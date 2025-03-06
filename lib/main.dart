@@ -78,7 +78,6 @@ class _MainScreenState extends State<MainScreen> {
         notchMargin: 12.0, 
         child: Container(
           height: 60, 
-          padding: const EdgeInsets.symmetric(horizontal: 0.0),
           child: Row(
             children: [
               // Left side 
