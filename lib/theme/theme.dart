@@ -1,56 +1,59 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Heading text styles using Outfit font
-  static TextStyle headingLarge = GoogleFonts.outfit(
-    fontSize: 24.0,
-    fontWeight: FontWeight.bold,
-  );
-  
-  static TextStyle headingMedium = GoogleFonts.outfit(
-    fontSize: 20.0,
-    fontWeight: FontWeight.w600,
-  );
-  
-  static TextStyle headingSmall = GoogleFonts.outfit(
-    fontSize: 18.0,
-    fontWeight: FontWeight.w500,
-  );
-  
-  // Body text styles using Inter font
-  static TextStyle bodyLarge = GoogleFonts.inter(
-    fontSize: 16.0,
-    fontWeight: FontWeight.normal,
-  );
-  
-  static TextStyle bodyMedium = GoogleFonts.inter(
-    fontSize: 14.0,
-    fontWeight: FontWeight.normal,
-  );
-  
-  static TextStyle bodySmall = GoogleFonts.inter(
-    fontSize: 12.0,
-    fontWeight: FontWeight.normal,
-  );
-  
-  // Create a ThemeData that uses these text styles
-  static ThemeData theme() {
-    return ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 136, 255, 249)),
-      useMaterial3: true,
-      textTheme: TextTheme(
-        // Headings
-        headlineLarge: headingLarge,
-        headlineMedium: headingMedium,
-        headlineSmall: headingSmall,
-        titleLarge: headingMedium,
-        
-        // Body text
-        bodyLarge: bodyLarge,
-        bodyMedium: bodyMedium,
-        bodySmall: bodySmall,
+  static final ThemeData lightTheme = ThemeData(
+    brightness: Brightness.light,
+    primarySwatch: Colors.teal,
+    scaffoldBackgroundColor: Colors.grey[200],
+    appBarTheme: AppBarTheme(
+      color: Colors.teal,
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.teal,
       ),
-    );
+    ),
+    textTheme: TextTheme(
+      bodyLarge: TextStyle(),
+      bodyMedium: TextStyle(),
+    ).apply(
+      bodyColor: Colors.teal[800],
+    ),
+  );
+
+  static final ThemeData darkTheme = ThemeData(
+    brightness: Brightness.dark,
+    primarySwatch: Colors.teal,
+    scaffoldBackgroundColor: Colors.grey[900],
+    appBarTheme: AppBarTheme(
+      color: Colors.teal[700],
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.tealAccent,
+      ),
+    ),
+    textTheme: TextTheme(
+      bodyLarge: TextStyle(),
+      bodyMedium: TextStyle(),
+    ).apply(
+      bodyColor: Colors.tealAccent[100],
+    ),
+  );
+}
+
+class ThemeNotifier extends ChangeNotifier {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  ThemeMode get themeMode => _themeMode;
+
+  void setThemeMode(ThemeMode mode) {
+    _themeMode = mode;
+    notifyListeners();
+  }
+
+  void toggleTheme() {
+    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    notifyListeners();
   }
 }

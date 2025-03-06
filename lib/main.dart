@@ -5,24 +5,34 @@ import 'screens/add_expense_screen.dart';
 import 'screens/expenses_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/theme.dart';
+import 'package:provider/provider.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => ThemeNotifier(),
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
+  const MyApp({Key? key}) : super(key: key);
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Shaire',
-      theme: AppTheme.theme(),
-      home: const MainScreen(),
+    return Consumer<ThemeNotifier>(
+      builder: (context, themeNotifier, child) {
+        return MaterialApp(
+          title: 'Shaire',
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeNotifier.themeMode,
+          home: const MainScreen(),
+        );
+      },
     );
   }
 }
-
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -58,7 +68,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: Colors.teal,
         title: const Text('Shaire'),
       ),
       body: _screens[_selectedIndex == 2
@@ -67,13 +77,14 @@ class _MainScreenState extends State<MainScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: () => _onItemTapped(2),
         tooltip: 'Add Expense',
-        backgroundColor: Theme.of(context).colorScheme.primary,
+        backgroundColor: Colors.teal,
         elevation: 6.0,
         shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
+        color: Colors.grey[300],
         shape: const CircularNotchedRectangle(),
         notchMargin: 12.0, 
         child: Container(
@@ -90,7 +101,7 @@ class _MainScreenState extends State<MainScreen> {
                       icon: Icon(
                         Icons.home,
                         color: _selectedIndex == 0
-                            ? Theme.of(context).colorScheme.primary
+                            ? Colors.teal
                             : null,
                       ),
                       onPressed: () => _onItemTapped(0),
@@ -99,7 +110,7 @@ class _MainScreenState extends State<MainScreen> {
                       icon: Icon(
                         Icons.group,
                         color: _selectedIndex == 1
-                            ? Theme.of(context).colorScheme.primary
+                            ? Colors.teal
                             : null,
                       ),
                       onPressed: () => _onItemTapped(1),
@@ -120,7 +131,7 @@ class _MainScreenState extends State<MainScreen> {
                       icon: Icon(
                         Icons.receipt_long,
                         color: _selectedIndex == 3
-                            ? Theme.of(context).colorScheme.primary
+                            ? Colors.teal
                             : null,
                       ),
                       onPressed: () => _onItemTapped(3),
@@ -129,7 +140,7 @@ class _MainScreenState extends State<MainScreen> {
                       icon: Icon(
                         Icons.person,
                         color: _selectedIndex == 4
-                            ? Theme.of(context).colorScheme.primary
+                            ? Colors.teal
                             : null,
                       ),
                       onPressed: () => _onItemTapped(4),
