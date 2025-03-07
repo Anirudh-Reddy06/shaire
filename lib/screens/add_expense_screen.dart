@@ -82,7 +82,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               Center(
                 child: ElevatedButton.icon(
                   onPressed: _scanReceipt,
-                  icon: const Icon(Icons.document_scanner),
+                  icon: const Icon(Icons.document_scanner, color: Colors.white),
                   label: const Text('Scan Receipt'),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(200, 50),

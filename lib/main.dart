@@ -113,7 +113,7 @@ class _MainScreenState extends State<MainScreen> {
             // Hide button if not on home or profile screen
             style: _selectedIndex != 0 && _selectedIndex != 4
                 ? ButtonStyle(
-                    foregroundColor: MaterialStateProperty.all(Colors.transparent),
+                    foregroundColor: WidgetStateProperty.all(Colors.transparent),
                   )
                 : null,
           ),
@@ -149,7 +149,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
               
               // Space for the FAB
-              const SizedBox(width: 40),
+              const SizedBox(width: 20),
               
               // Right side items
               Expanded(
@@ -173,7 +173,7 @@ class _MainScreenState extends State<MainScreen> {
   // Helper method to build nav items with consistent style and reduced size
   Widget _buildNavItem(int index, IconData icon, String label) {
     return Padding(
-      padding: const EdgeInsets.only(top: 2.0),
+      padding: const EdgeInsets.only(top: 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -204,7 +204,6 @@ class _MainScreenState extends State<MainScreen> {
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 5), 
         ],
       ),
     );

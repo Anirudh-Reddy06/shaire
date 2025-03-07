@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +60,7 @@ class HomeScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
+          const Padding(
             padding: EdgeInsets.all(16),
             child: Text('Recent Activities', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ),
@@ -84,7 +84,7 @@ class HomeScreen extends StatelessWidget {
       leading: Icon(icon),
       title: Text(title),
       subtitle: Text(action),
-      trailing: Text(amount, style: TextStyle(fontWeight: FontWeight.bold)),
+      trailing: Text(amount, style: const TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 }

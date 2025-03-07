@@ -111,15 +111,13 @@ class AppTheme {
   static final ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
-    colorScheme: ColorScheme.light(
+    colorScheme: const ColorScheme.light(
       primary: primaryColor,
       secondary: accentColor,
       error: errorColor,
       onPrimary: Colors.white,
       onSecondary: _lightTextPrimaryColor,
       onError: Colors.white,
-      background: _lightBackgroundColor,
-      onBackground: _lightTextPrimaryColor,
       surface: _lightCardColor,
       onSurface: _lightTextPrimaryColor,
     ),
@@ -131,19 +129,19 @@ class AppTheme {
       foregroundColor: _lightTextPrimaryColor,
       elevation: 0,
       centerTitle: true,
-      systemOverlayStyle: SystemUiOverlayStyle(
+      systemOverlayStyle: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
       ),
-      iconTheme: IconThemeData(color: _lightTextPrimaryColor),
+      iconTheme: const IconThemeData(color: _lightTextPrimaryColor),
       titleTextStyle: GoogleFonts.outfit(
         fontSize: 22,
         fontWeight: FontWeight.w600,
         color: _lightTextPrimaryColor,
       ),
     ),
-    iconTheme: IconThemeData(
+    iconTheme: const IconThemeData(
       color: _lightTextSecondaryColor,
     ),
     textTheme: _buildTextTheme(
@@ -203,11 +201,11 @@ class AppTheme {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: primaryColor, width: 2),
+        borderSide: const BorderSide(color: primaryColor, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: errorColor, width: 1),
+        borderSide: const BorderSide(color: errorColor, width: 1),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       hintStyle: GoogleFonts.inter(
@@ -242,11 +240,11 @@ class AppTheme {
       color: Colors.white,
       elevation: 8,
     ),
-    floatingActionButtonTheme: FloatingActionButtonThemeData(
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
       backgroundColor: primaryColor,
       foregroundColor: Colors.white,
       elevation: 6,
-      shape: const CircleBorder(),
+      shape: CircleBorder(),
     ),
   );
 
@@ -254,15 +252,13 @@ class AppTheme {
   static final ThemeData darkTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    colorScheme: ColorScheme.dark(
+    colorScheme: const ColorScheme.dark(
       primary: primaryColor,
       secondary: accentColor,
       error: errorColor,
       onPrimary: _lightTextPrimaryColor, // Dark text on primary buttons 
       onSecondary: _lightTextPrimaryColor,
       onError: _lightTextPrimaryColor,
-      background: _darkBackgroundColor,
-      onBackground: _darkTextPrimaryColor,
       surface: _darkCardColor,
       onSurface: _darkTextPrimaryColor,
     ),
@@ -274,19 +270,19 @@ class AppTheme {
       foregroundColor: _darkTextPrimaryColor,
       elevation: 0,
       centerTitle: true,
-      systemOverlayStyle: SystemUiOverlayStyle(
+      systemOverlayStyle: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
         statusBarBrightness: Brightness.dark,
       ),
-      iconTheme: IconThemeData(color: _darkTextPrimaryColor),
+      iconTheme: const IconThemeData(color: _darkTextPrimaryColor),
       titleTextStyle: GoogleFonts.outfit(
         fontSize: 22,
         fontWeight: FontWeight.w600,
         color: _darkTextPrimaryColor,
       ),
     ),
-    iconTheme: IconThemeData(
+    iconTheme: const IconThemeData(
       color: _darkTextSecondaryColor,
     ),
     textTheme: _buildTextTheme(
@@ -322,7 +318,7 @@ class AppTheme {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: accentColor,
-        side: BorderSide(color: accentColor, width: 1.5),
+        side: const BorderSide(color: accentColor, width: 1.5),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
@@ -335,22 +331,22 @@ class AppTheme {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Color(0xFF2A2A2A),
+      fillColor: const Color(0xFF2A2A2A),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: _darkDividerColor),
+        borderSide: const BorderSide(color: _darkDividerColor),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: _darkDividerColor),
+        borderSide: const BorderSide(color: _darkDividerColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: accentColor, width: 2),
+        borderSide: const BorderSide(color: accentColor, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: errorColor, width: 1),
+        borderSide: const BorderSide(color: errorColor, width: 1),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       hintStyle: GoogleFonts.inter(
@@ -381,15 +377,15 @@ class AppTheme {
         borderRadius: BorderRadius.circular(16),
       ),
     ),
-    bottomAppBarTheme: BottomAppBarTheme(
+    bottomAppBarTheme: const BottomAppBarTheme(
       color: _darkCardColor,
       elevation: 8,
     ),
-    floatingActionButtonTheme: FloatingActionButtonThemeData(
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
       backgroundColor: primaryColor,
       foregroundColor: _lightTextPrimaryColor, // Dark text on primary color
       elevation: 6,
-      shape: const CircleBorder(),
+      shape: CircleBorder(),
     ),
   );
 }
