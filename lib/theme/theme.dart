@@ -3,16 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Define common colors based on your specifications
-  static const Color primaryColor = Color(0xFF99CF70); // Green color you requested
-  static const Color primaryDarkColor = Color(0xFF85B762); // Slightly darker shade for hover/press states
-  static const Color accentColor = Color(0xFFBBE3A3); // Lighter variant for accents
-  static const Color errorColor = Color(0xFFE53935); // Keeping the red for errors
+  // Define common colors
+  static const Color primaryColor = Color(0xFF99CF70); 
+  static const Color primaryDarkColor = Color(0xFF85B762); 
+  static const Color accentColor = Color(0xFFBBE3A3); 
+  static const Color errorColor = Color(0xFFE53935); 
   
   // Light theme colors
   static const Color _lightTextPrimaryColor = Color(0xFF161616); // Dark text in light mode
   static const Color _lightTextSecondaryColor = Color(0xFF555555); // Secondary text in light mode
-  static const Color _lightBackgroundColor = Color(0xFFE2E7E0); // Light background you requested
+  static const Color _lightBackgroundColor = Color.fromARGB(255, 238, 241, 237); // Light background 
   static const Color _lightCardColor = Colors.white;
   static const Color _lightDividerColor = Color(0xFFDDDDDD);
   
