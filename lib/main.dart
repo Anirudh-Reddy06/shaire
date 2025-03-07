@@ -11,13 +11,13 @@ void main() {
   runApp(
     ChangeNotifierProvider(
       create: (context) => ThemeNotifier(),
-      child: MyApp(),
+      child: const MyApp(),
     ),
   );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeNotifier>(
@@ -28,6 +28,7 @@ class MyApp extends StatelessWidget {
           darkTheme: AppTheme.darkTheme,
           themeMode: themeNotifier.themeMode,
           home: const MainScreen(),
+          debugShowCheckedModeBanner: false,
         );
       },
     );
@@ -51,6 +52,14 @@ class _MainScreenState extends State<MainScreen> {
     const ProfileScreen(),
   ];
 
+  // Screen titles map (for centered title)
+  final Map<int, String> _screenTitles = {
+    0: 'Shaire',
+    1: 'Groups',
+    3: 'Expenses',
+    4: 'Profile',
+  };
+
   void _onItemTapped(int index) {
     if (index == 2) {
       // Navigate to add expense screen
@@ -68,52 +77,73 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.teal,
-        title: const Text('Shaire'),
+        backgroundColor: Colors.transparent,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 20, top: 8, bottom: 8, right: 8),
+          child: Image.asset('assets/images/logo.png'),
+        ),
+        title: Text(
+          _screenTitles[_selectedIndex] ?? '',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        centerTitle: true,
+        actions: [
+          // Show notifications icon on home screen, settings icon on profile screen
+          Padding(
+            padding: const EdgeInsets.only(right: 16 ,top: 8, bottom: 8, left: 8),
+            child: IconButton(
+            icon: Icon(
+              _selectedIndex == 0 ? Icons.notifications : 
+              _selectedIndex == 4 ? Icons.settings : null,
+            ),
+            onPressed: () {
+              if (_selectedIndex == 0) {
+                // Navigate to notifications
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Notifications coming soon')),
+                );
+              } else if (_selectedIndex == 4) {
+                // Navigate to settings
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                );
+              }
+            },
+            // Hide button if not on home or profile screen
+            style: _selectedIndex != 0 && _selectedIndex != 4
+                ? ButtonStyle(
+                    foregroundColor: MaterialStateProperty.all(Colors.transparent),
+                  )
+                : null,
+          ),
+          ),
+        ],
       ),
-      body: _screens[_selectedIndex == 2
-          ? 0
-          : _selectedIndex], // Avoid showing empty screen for index 2
+      body: _screens[_selectedIndex == 2 ? 0 : _selectedIndex],
       floatingActionButton: FloatingActionButton(
         onPressed: () => _onItemTapped(2),
         tooltip: 'Add Expense',
-        backgroundColor: Colors.teal,
-        elevation: 6.0,
-        shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
-        color: Colors.grey[300],
         shape: const CircularNotchedRectangle(),
-        notchMargin: 12.0, 
-        child: Container(
-          height: 60, 
+        notchMargin: 12.0,
+        child: SizedBox(
+          height: 70, // Increase height to fix overflow
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Left side 
+              // Left side items
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.home,
-                        color: _selectedIndex == 0
-                            ? Colors.teal
-                            : null,
-                      ),
-                      onPressed: () => _onItemTapped(0),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.group,
-                        color: _selectedIndex == 1
-                            ? Colors.teal
-                            : null,
-                      ),
-                      onPressed: () => _onItemTapped(1),
-                    ),
+                    // Shaire button
+                    _buildNavItem(0, Icons.home, 'Shaire'),
+                    // Groups button
+                    _buildNavItem(1, Icons.group, 'Groups'),
                   ],
                 ),
               ),
@@ -121,35 +151,61 @@ class _MainScreenState extends State<MainScreen> {
               // Space for the FAB
               const SizedBox(width: 40),
               
-              // Right side 
+              // Right side items
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.receipt_long,
-                        color: _selectedIndex == 3
-                            ? Colors.teal
-                            : null,
-                      ),
-                      onPressed: () => _onItemTapped(3),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.person,
-                        color: _selectedIndex == 4
-                            ? Colors.teal
-                            : null,
-                      ),
-                      onPressed: () => _onItemTapped(4),
-                    ),
+                    // Expenses button
+                    _buildNavItem(3, Icons.receipt_long, 'Expenses'),
+                    // Profile button
+                    _buildNavItem(4, Icons.person, 'Profile'),
                   ],
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Helper method to build nav items with consistent style and reduced size
+  Widget _buildNavItem(int index, IconData icon, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: Icon(
+              icon,
+              color: _selectedIndex == index
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+              size: 24, // Explicit size
+            ),
+            onPressed: () => _onItemTapped(index),
+            padding: EdgeInsets.zero, 
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(
+              minWidth: 40,
+              minHeight: 40,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: _selectedIndex == index
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).textTheme.bodySmall?.color,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 5), 
+        ],
       ),
     );
   }

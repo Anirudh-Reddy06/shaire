@@ -4,30 +4,19 @@ import 'package:provider/provider.dart';
 
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
+  const ProfileScreen({super.key});
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Profile'),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => SettingsScreen()));
-            },
-          ),
-        ],
-      ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             _buildProfilePhoto(),
-            SizedBox(height: 24),
+            const SizedBox(height: 24),
             _buildProfileInfo(),
-            SizedBox(height: 24),
+            const SizedBox(height: 24),
             _buildPaymentInfo(),
           ],
         ),
@@ -46,21 +35,21 @@ class ProfileScreen extends StatelessWidget {
   Widget _buildProfileInfo() {
     return Card(
       child: Padding(
-        padding: EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Profile Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            SizedBox(height: 16),
+            const Text('Profile Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             _buildInfoRow('Name', 'John Doe'),
             _buildInfoRow('Username', '@johndoe'),
             _buildInfoRow('Mobile Number', '+1 234 567 8900'),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
                 // Navigate to edit profile screen
               },
-              child: Text('Edit Profile'),
+              child: const Text('Edit Profile'),
             ),
           ],
         ),
@@ -71,20 +60,20 @@ class ProfileScreen extends StatelessWidget {
   Widget _buildPaymentInfo() {
     return Card(
       child: Padding(
-        padding: EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Payment Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            SizedBox(height: 16),
+            const Text('Payment Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             _buildInfoRow('Currency', 'USD'),
             _buildInfoRow('UPI ID', 'johndoe@upi'),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
                 // Navigate to edit payment info screen
               },
-              child: Text('Edit Payment Info'),
+              child: const Text('Edit Payment Info'),
             ),
           ],
         ),
@@ -94,11 +83,11 @@ class ProfileScreen extends StatelessWidget {
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: FontWeight.bold)),
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
           Text(value),
         ],
       ),
@@ -107,17 +96,19 @@ class ProfileScreen extends StatelessWidget {
 }
 
 class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Settings'),
+        title: const Text('Settings'),
       ),
       body: ListView(
         children: [
           ListTile(
-            leading: Icon(Icons.brightness_6),
-            title: Text('Dark Theme'),
+            leading: const Icon(Icons.brightness_6),
+            title: const Text('Dark Theme'),
             trailing: Consumer<ThemeNotifier>(
               builder: (context, themeNotifier, child) {
                 return Switch(
@@ -130,25 +121,25 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: Icon(Icons.exit_to_app),
-            title: Text('Sign Out'),
+            leading: const Icon(Icons.exit_to_app),
+            title: const Text('Sign Out'),
             onTap: () {
               // TODO: Implement sign out logic
               showDialog(
                 context: context,
                 builder: (BuildContext context) {
                   return AlertDialog(
-                    title: Text('Sign Out'),
-                    content: Text('Are you sure you want to sign out?'),
+                    title: const Text('Sign Out'),
+                    content: const Text('Are you sure you want to sign out?'),
                     actions: <Widget>[
                       TextButton(
-                        child: Text('Cancel'),
+                        child: const Text('Cancel'),
                         onPressed: () {
                           Navigator.of(context).pop();
                         },
                       ),
                       TextButton(
-                        child: Text('Sign Out'),
+                        child: const Text('Sign Out'),
                         onPressed: () {
                           // TODO: Implement actual sign out logic
                           Navigator.of(context).pop();

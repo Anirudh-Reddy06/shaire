@@ -6,9 +6,6 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Home'),
-      ),
       body: Column(
         children: [
           _buildBalanceSection(),
@@ -20,12 +17,16 @@ class HomeScreen extends StatelessWidget {
 
   Widget _buildBalanceSection() {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _buildBalanceCard('You Get', '\$150.00', Colors.green),
-          _buildBalanceCard('You Owe', '\$75.00', Colors.red),
+          Expanded(
+            child: _buildBalanceCard('You Get', '\$150.00', Colors.green),
+          ),
+          const SizedBox(width: 4), // Space between cards
+          Expanded(
+            child: _buildBalanceCard('You Owe', '\$75.00', Colors.red),
+          ),
         ],
       ),
     );
@@ -35,12 +36,19 @@ class HomeScreen extends StatelessWidget {
     return Card(
       elevation: 4,
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Text(title, style: TextStyle(fontSize: 16)),
-            SizedBox(height: 8),
-            Text(amount, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
+            Text(title, style: const TextStyle(fontSize: 16)),
+            const SizedBox(height: 8),
+            Text(
+              amount, 
+              style: TextStyle(
+                fontSize: 24, 
+                fontWeight: FontWeight.bold, 
+                color: color
+              )
+            ),
           ],
         ),
       ),

@@ -14,8 +14,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final _formKey = GlobalKey<FormState>();
   
   // Selected friends/group
-  List<String> _availableFriends = ['Alex', 'Bailey', 'Charlie', 'Dana', 'Evan'];
-  List<String> _selectedFriends = [];
+  final List<String> _availableFriends = ['Alex', 'Bailey', 'Charlie', 'Dana', 'Evan'];
+  final List<String> _selectedFriends = [];
 
   // Form fields
   final TextEditingController _descriptionController = TextEditingController();
@@ -38,7 +38,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   ];
 
   // Bill entries
-  List<BillEntry> _billEntries = [];
+  final List<BillEntry> _billEntries = [];
 
   @override
   void dispose() {
@@ -58,7 +58,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         actions: [
           if (_manualEntryMode)
             IconButton(
-              icon: Icon(Icons.check),
+              icon: const Icon(Icons.check),
               onPressed: _saveExpense,
             ),
         ],
@@ -182,7 +182,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.attach_money),
                       ),
-                      keyboardType: TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
                       ],
@@ -385,7 +385,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
-  List<String> _selectedFriends = [];
+  final List<String> _selectedFriends = [];
 
   @override
   void dispose() {
@@ -435,7 +435,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
                 border: OutlineInputBorder(),
                 prefixText: '\$',
               ),
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
               ],
