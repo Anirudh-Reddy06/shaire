@@ -131,7 +131,6 @@ class _MainScreenState extends State<MainScreen> {
         shape: const CircularNotchedRectangle(),
         notchMargin: 12.0,
         child: SizedBox(
-          height: 70, // Increase height to fix overflow
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -149,7 +148,7 @@ class _MainScreenState extends State<MainScreen> {
               ),
               
               // Space for the FAB
-              const SizedBox(width: 20),
+              const SizedBox(width: 50),
               
               // Right side items
               Expanded(
@@ -184,7 +183,7 @@ class _MainScreenState extends State<MainScreen> {
               color: _selectedIndex == index
                   ? Theme.of(context).colorScheme.primary
                   : null,
-              size: 24, // Explicit size
+              size: 28, // Explicit size
             ),
             onPressed: () => _onItemTapped(index),
             padding: EdgeInsets.zero, 
@@ -197,7 +196,7 @@ class _MainScreenState extends State<MainScreen> {
           Text(
             label,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 10,
               color: _selectedIndex == index
                   ? Theme.of(context).colorScheme.primary
                   : Theme.of(context).textTheme.bodySmall?.color,

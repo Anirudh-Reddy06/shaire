@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import '../services/bill_service.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   const AddExpenseScreen({super.key});
@@ -38,7 +41,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   ];
 
   // Bill entries
-  final List<BillEntry> _billEntries = [];
+  List<BillEntry> _billEntries = [];
+
+  // Loading state
+  bool _isLoading = false;
+  final BillService _billService = BillService();
 
   @override
   void dispose() {
@@ -101,6 +108,20 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                     });
                   },
                   child: const Text('Add Manually Instead'),
+                ),
+              ),
+            ],
+
+            // Loading Indicator
+            if (_isLoading) ...[
+              const SizedBox(height: 20),
+              const Center(
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 12),
+                    Text('Processing receipt...'),
+                  ],
                 ),
               ),
             ],
@@ -206,15 +227,25 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                           'Bill Entries',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
-                        ElevatedButton.icon(
-                          onPressed: _addBillEntry,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Item'),
-                          style: ElevatedButton.styleFrom(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.people_alt),
+                              tooltip: 'Batch assignment',
+                              onPressed: _billEntries.isNotEmpty ? _showBatchAssignmentOptions : null,
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: _addBillEntry,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add Item'),
+                              style: ElevatedButton.styleFrom(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -294,6 +325,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => _editBillEntry(index),
+                    iconSize: 20,
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () => _removeBillEntry(index),
                     color: Colors.red,
@@ -328,11 +364,183 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     }
   }
 
-  void _scanReceipt() {
-    // TODO: Implement receipt scanning functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Receipt scanning not implemented yet')),
-    );
+  Future<void> _scanReceipt() async {
+    final ImagePicker picker = ImagePicker();
+    
+    try {
+      // Show options dialog
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text('Select Image Source'),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: <Widget>[
+                  GestureDetector(
+                    child: Text('Camera'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _getImageAndProcess(ImageSource.camera);
+                    },
+                  ),
+                  Padding(padding: EdgeInsets.all(8.0)),
+                  GestureDetector(
+                    child: Text('Gallery'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      _getImageAndProcess(ImageSource.gallery);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error accessing camera or gallery: $e')),
+      );
+    }
+  }
+
+  Future<void> _getImageAndProcess(ImageSource source) async {
+    final ImagePicker picker = ImagePicker();
+    
+    try {
+      // Check server health first
+      //final bool isServerHealthy = await _billService.checkServerHealth();
+      //if (!isServerHealthy) {
+      //  ScaffoldMessenger.of(context).showSnackBar(
+      //    const SnackBar(content: Text('Receipt scanning server is not available')),
+      //  );
+      //  return;
+      //}
+      
+      // Pick an image
+      final XFile? pickedFile = await picker.pickImage(source: source);
+      
+      if (pickedFile == null) {
+        // User canceled image picking
+        return;
+      }
+      
+      // Show loading indicator
+      setState(() {
+        _isLoading = true;
+      });
+      
+      // Process image
+      File imageFile = File(pickedFile.path);
+      Map<String, dynamic> result = await _billService.extractBillInfo(imageFile);
+      
+      // Hide loading indicator
+      setState(() {
+        _isLoading = false;
+        // Switch to manual mode to show the entries
+        _manualEntryMode = true;
+      });
+      
+      // Process bill items from the result
+      if (result.containsKey('items') && result['items'] is List) {
+        List<dynamic> items = result['items'];
+        
+        // Clear existing bill entries if there are any
+        _billEntries.clear();
+        
+        // Populate description field if available
+        if (result.containsKey('merchant_name') && result['merchant_name'] != null) {
+          _descriptionController.text = result['merchant_name'];
+        }
+        
+        // Populate date field if available
+        if (result.containsKey('date') && result['date'] != null) {
+          try {
+            _selectedDate = DateTime.parse(result['date']);
+          } catch (e) {
+            // If date parsing fails, keep the current date
+          }
+        }
+        
+        // Populate total amount if available
+        if (result.containsKey('total_amount') && result['total_amount'] != null) {
+          _totalAmountController.text = result['total_amount'].toString();
+        }
+        
+        // Add bill entries from items
+        for (var item in items) {
+          if (item.containsKey('description') && item.containsKey('amount')) {
+            final newEntry = BillEntry(
+              description: item['description'],
+              amount: double.tryParse(item['amount'].toString()) ?? 0.0,
+              assignedTo: [], // Start with empty list instead of auto-assigning
+            );
+            
+            setState(() {
+              _billEntries.add(newEntry);
+            });
+          }
+        }
+
+        // After processing all items, show a message about assignment
+        if (_billEntries.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Receipt processed! Please assign people to each item.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        
+        // Try to guess category based on merchant name or items
+        _guessCategory();
+        
+      } else {
+        // Show error if no items were found
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not extract items from receipt')),
+        );
+      }
+    } catch (e) {
+      // Hide loading indicator and show error
+      setState(() {
+        _isLoading = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error processing receipt: $e')),
+      );
+    }
+  }
+
+  void _guessCategory() {
+    final String description = _descriptionController.text.toLowerCase();
+    
+    if (description.contains('restaurant') || 
+        description.contains('café') || 
+        description.contains('cafe') ||
+        description.contains('bar') ||
+        description.contains('grill')) {
+      _selectedCategory = 'Food & Drinks';
+    } else if (description.contains('taxi') || 
+               description.contains('uber') || 
+               description.contains('lyft') ||
+               description.contains('transport')) {
+      _selectedCategory = 'Transportation';
+    } else if (description.contains('cinema') || 
+               description.contains('movie') || 
+               description.contains('theatre') ||
+               description.contains('theater')) {
+      _selectedCategory = 'Entertainment';
+    } else if (description.contains('market') || 
+               description.contains('shop') || 
+               description.contains('store')) {
+      _selectedCategory = 'Shopping';
+    } else {
+      // Default to Other if no match
+      _selectedCategory = 'Other';
+    }
   }
 
   void _addBillEntry() {
@@ -356,6 +564,25 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     });
   }
 
+  void _editBillEntry(int index) {
+    final entry = _billEntries[index];
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _AddBillEntryBottomSheet(
+        availableFriends: _availableFriends,
+        onAdd: (updatedEntry) {
+          setState(() {
+            _billEntries[index] = updatedEntry;
+          });
+        },
+        initialEntry: entry, // Pass the existing entry to pre-populate the form
+        title: 'Edit Bill Item', // Change the title to indicate editing mode
+      ),
+    );
+  }
+
   void _saveExpense() {
     if (_formKey.currentState!.validate()) {
       // TODO: Save expense to database or state management
@@ -365,16 +592,91 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       Navigator.pop(context);
     }
   }
+
+  void _showBatchAssignmentOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Batch Assign Items',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.people),
+              title: const Text('Assign all items to everyone'),
+              onTap: () {
+                for (int i = 0; i < _billEntries.length; i++) {
+                  setState(() {
+                    _billEntries[i] = BillEntry(
+                      description: _billEntries[i].description,
+                      amount: _billEntries[i].amount,
+                      assignedTo: List.from(_availableFriends),
+                    );
+                  });
+                }
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Assign all items to selected friends'),
+              enabled: _selectedFriends.isNotEmpty,
+              onTap: () {
+                if (_selectedFriends.isEmpty) return;
+                
+                for (int i = 0; i < _billEntries.length; i++) {
+                  setState(() {
+                    _billEntries[i] = BillEntry(
+                      description: _billEntries[i].description,
+                      amount: _billEntries[i].amount,
+                      assignedTo: List.from(_selectedFriends),
+                    );
+                  });
+                }
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.clear),
+              title: const Text('Clear all assignments'),
+              onTap: () {
+                for (int i = 0; i < _billEntries.length; i++) {
+                  setState(() {
+                    _billEntries[i] = BillEntry(
+                      description: _billEntries[i].description,
+                      amount: _billEntries[i].amount,
+                      assignedTo: [],
+                    );
+                  });
+                }
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // Bottom sheet for adding a bill entry
 class _AddBillEntryBottomSheet extends StatefulWidget {
   final List<String> availableFriends;
   final Function(BillEntry) onAdd;
+  final BillEntry? initialEntry; // Add this to support editing
+  final String title; // Add this to customize the title
 
   const _AddBillEntryBottomSheet({
     required this.availableFriends,
     required this.onAdd,
+    this.initialEntry,
+    this.title = 'Add Bill Item',
   });
 
   @override
@@ -385,7 +687,19 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
-  final List<String> _selectedFriends = [];
+  List<String> _selectedFriends = [];
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // Pre-populate form if editing an existing entry
+    if (widget.initialEntry != null) {
+      _descriptionController.text = widget.initialEntry!.description;
+      _amountController.text = widget.initialEntry!.amount.toString();
+      _selectedFriends = List.from(widget.initialEntry!.assignedTo);
+    }
+  }
 
   @override
   void dispose() {
@@ -410,7 +724,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Add Bill Item',
+              widget.title, // Use the customized title
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 16),
