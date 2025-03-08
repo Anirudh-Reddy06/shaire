@@ -41,7 +41,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   ];
 
   // Bill entries
-  List<BillEntry> _billEntries = [];
+  final List<BillEntry> _billEntries = [];
 
   // Loading state
   bool _isLoading = false;
@@ -237,7 +237,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                             const SizedBox(width: 8),
                             ElevatedButton.icon(
                               onPressed: _addBillEntry,
-                              icon: const Icon(Icons.add),
+                              icon: const Icon(Icons.add, color: Colors.white),
                               label: const Text('Add Item'),
                               style: ElevatedButton.styleFrom(
                                 shape: RoundedRectangleBorder(
@@ -373,20 +373,20 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         context: context,
         builder: (BuildContext context) {
           return AlertDialog(
-            title: Text('Select Image Source'),
+            title: const Text('Select Image Source'),
             content: SingleChildScrollView(
               child: ListBody(
                 children: <Widget>[
                   GestureDetector(
-                    child: Text('Camera'),
+                    child: const Text('Camera'),
                     onTap: () {
                       Navigator.of(context).pop();
                       _getImageAndProcess(ImageSource.camera);
                     },
                   ),
-                  Padding(padding: EdgeInsets.all(8.0)),
+                  const Padding(padding: EdgeInsets.all(8.0)),
                   GestureDetector(
-                    child: Text('Gallery'),
+                    child: const Text('Gallery'),
                     onTap: () {
                       Navigator.of(context).pop();
                       _getImageAndProcess(ImageSource.gallery);

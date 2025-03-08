@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class GroupsScreen extends StatefulWidget {
-  const GroupsScreen({Key? key}) : super(key: key);
+  const GroupsScreen({super.key});
 
   @override
   State<GroupsScreen> createState() => _GroupsScreenState();
@@ -30,13 +30,13 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
         children: [
           TabBar(
             controller: _tabController,
-            tabs: [
+            tabs: const [
               Tab(text: 'Friends'),
               Tab(text: 'Groups'),
             ],
-            labelColor: Theme.of(context).primaryColor,
+            labelColor: Colors.lightGreen,
             unselectedLabelColor: Colors.grey,
-            indicatorColor: Theme.of(context).primaryColor,
+            indicatorColor: Colors.lightGreen,
           ),
           Expanded(
             child: TabBarView(
@@ -60,15 +60,15 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
             itemCount: 5, // Replace with actual friends list length
             itemBuilder: (context, index) {
               return ListTile(
-                leading: CircleAvatar(
+                leading: const CircleAvatar(
                   child: Icon(Icons.person),
                 ),
                 title: Text('Friend $index'),
-                subtitle: Text('You get \$10.00, You owe \$5.00'),
+                subtitle: const Text('You get \$10.00, You owe \$5.00'),
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => FriendDetailsScreen()),
+                    MaterialPageRoute(builder: (context) => const FriendDetailsScreen()),
                   );
                 },
               );
@@ -82,8 +82,8 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
               // Add friend logic here
               print('Add friend button pressed');
             },
-            child: Icon(Icons.person_add),
             tooltip: 'Add Friend',
+            child: const Icon(Icons.person_add),
           ),
         ),
       ],
@@ -98,13 +98,13 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
             itemCount: 5, // Replace with actual groups list length
             itemBuilder: (context, index) {
               return ListTile(
-                leading: Icon(Icons.group),
+                leading: const Icon(Icons.group),
                 title: Text('Group $index'),
-                subtitle: Text('Members: 5'),
+                subtitle: const Text('Members: 5'),
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => GroupDetailsScreen()),
+                    MaterialPageRoute(builder: (context) => const GroupDetailsScreen()),
                   );
                 },
               );
@@ -122,16 +122,16 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
                   // Join group logic here
                   print('Join group button pressed');
                 },
-                child: Icon(Icons.group_add),
                 tooltip: 'Join Group',
+                child: const Icon(Icons.group_add),
               ),
               FloatingActionButton(
                 onPressed: () {
                   // Create group logic here
                   print('Create group button pressed');
                 },
-                child: Icon(Icons.create),
                 tooltip: 'Create Group',
+                child: const Icon(Icons.create),
               ),
             ],
           ),
@@ -142,11 +142,13 @@ class _GroupsScreenState extends State<GroupsScreen> with TickerProviderStateMix
 }
 
 class FriendDetailsScreen extends StatelessWidget {
+  const FriendDetailsScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Friend Details'),
+        title: const Text('Friend Details'),
       ),
       body: Column(
         children: [
@@ -167,7 +169,7 @@ class FriendDetailsScreen extends StatelessWidget {
 
   Widget _buildGetOweStatus() {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
@@ -182,11 +184,11 @@ class FriendDetailsScreen extends StatelessWidget {
     return Card(
       elevation: 4,
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Text(title, style: TextStyle(fontSize: 16)),
-            SizedBox(height: 8),
+            Text(title, style: const TextStyle(fontSize: 16)),
+            const SizedBox(height: 8),
             Text(amount, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
           ],
         ),
@@ -198,17 +200,19 @@ class FriendDetailsScreen extends StatelessWidget {
     return ListTile(
       title: Text(title),
       subtitle: Text(action),
-      trailing: Text(amount, style: TextStyle(fontWeight: FontWeight.bold)),
+      trailing: Text(amount, style: const TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 }
 
 class GroupDetailsScreen extends StatelessWidget {
+  const GroupDetailsScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Group Details'),
+        title: const Text('Group Details'),
       ),
       body: Column(
         children: [
@@ -229,8 +233,8 @@ class GroupDetailsScreen extends StatelessWidget {
 
   Widget _buildGroupMembers() {
     return Container(
-      padding: EdgeInsets.all(16),
-      child: Column(
+      padding: const EdgeInsets.all(16),
+      child: const Column(
         children: [
           Text('Group Members', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           SizedBox(height: 8),
@@ -254,7 +258,7 @@ class GroupDetailsScreen extends StatelessWidget {
     return ListTile(
       title: Text(title),
       subtitle: Text(action),
-      trailing: Text(amount, style: TextStyle(fontWeight: FontWeight.bold)),
+      trailing: Text(amount, style: const TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 }
