@@ -5,6 +5,7 @@ import 'screens/add_expense_screen.dart';
 import 'screens/expenses_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/theme.dart';
+import 'providers/currency_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -12,11 +13,15 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(
     url: 'https://ikcvgwtrgbeorwdycrxs.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlrY3Znd3RyZ2Jlb3J3ZHljcnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1MTM3MDMsImV4cCI6MjA1NzA4OTcwM30.azV2oLxI813aNEfmrApta7h6PZ1sbo31NgQq4s6W2Eo',
+    anonKey:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlrY3Znd3RyZ2Jlb3J3ZHljcnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1MTM3MDMsImV4cCI6MjA1NzA4OTcwM30.azV2oLxI813aNEfmrApta7h6PZ1sbo31NgQq4s6W2Eo',
   );
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => ThemeNotifier(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => ThemeNotifier()),
+        ChangeNotifierProvider(create: (context) => CurrencyProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -40,6 +45,7 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -50,13 +56,20 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
-  static final List<Widget> _screens = [
+  // Initialize directly instead of using late
+  final List<Widget> _screens = [
     const HomeScreen(),
     const GroupsScreen(),
     const SizedBox(), // Placeholder for FAB navigation
     const ExpensesScreen(),
     const ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Remove the initialization here
+  }
 
   // Screen titles map (for centered title)
   final Map<int, String> _screenTitles = {
@@ -81,51 +94,64 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Groups screen has its own AppBar, so we conditionally render the main AppBar
+    final bool isGroupsScreen = _selectedIndex == 1;
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 20, top: 8, bottom: 8, right: 8),
-          child: Image.asset('assets/images/logo.png'),
-        ),
-        title: Text(
-          _screenTitles[_selectedIndex] ?? '',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        centerTitle: true,
-        actions: [
-          // Show notifications icon on home screen, settings icon on profile screen
-          Padding(
-            padding: const EdgeInsets.only(right: 16 ,top: 8, bottom: 8, left: 8),
-            child: IconButton(
-            icon: Icon(
-              _selectedIndex == 0 ? Icons.notifications : 
-              _selectedIndex == 4 ? Icons.settings : null,
+      // Only show AppBar if NOT on the Groups screen
+      appBar: isGroupsScreen
+          ? null
+          : AppBar(
+              backgroundColor: Colors.transparent,
+              leading: Padding(
+                padding: const EdgeInsets.only(
+                    left: 20, top: 8, bottom: 8, right: 8),
+                child: Image.asset('assets/images/logo.png'),
+              ),
+              title: Text(
+                _screenTitles[_selectedIndex] ?? '',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              centerTitle: true,
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(
+                      right: 16, top: 8, bottom: 8, left: 8),
+                  child: IconButton(
+                    icon: Icon(
+                      _selectedIndex == 0
+                          ? Icons.notifications
+                          : _selectedIndex == 4
+                              ? Icons.settings
+                              : null,
+                    ),
+                    onPressed: () {
+                      if (_selectedIndex == 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Notifications coming soon'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      } else if (_selectedIndex == 4) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const SettingsScreen(),
+                          ),
+                        );
+                      }
+                    },
+                    style: _selectedIndex != 0 && _selectedIndex != 4
+                        ? ButtonStyle(
+                            foregroundColor:
+                                WidgetStateProperty.all(Colors.transparent),
+                          )
+                        : null,
+                  ),
+                ),
+              ],
             ),
-            onPressed: () {
-              if (_selectedIndex == 0) {
-                // Navigate to notifications
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Notifications coming soon')),
-                );
-              } else if (_selectedIndex == 4) {
-                // Navigate to settings
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const SettingsScreen()),
-                );
-              }
-            },
-            // Hide button if not on home or profile screen
-            style: _selectedIndex != 0 && _selectedIndex != 4
-                ? ButtonStyle(
-                    foregroundColor: WidgetStateProperty.all(Colors.transparent),
-                  )
-                : null,
-          ),
-          ),
-        ],
-      ),
       body: _screens[_selectedIndex == 2 ? 0 : _selectedIndex],
       floatingActionButton: FloatingActionButton(
         onPressed: () => _onItemTapped(2),
@@ -152,10 +178,10 @@ class _MainScreenState extends State<MainScreen> {
                   ],
                 ),
               ),
-              
+
               // Space for the FAB
               const SizedBox(width: 50),
-              
+
               // Right side items
               Expanded(
                 child: Row(
@@ -192,7 +218,7 @@ class _MainScreenState extends State<MainScreen> {
               size: 28, // Explicit size
             ),
             onPressed: () => _onItemTapped(index),
-            padding: EdgeInsets.zero, 
+            padding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(
               minWidth: 40,

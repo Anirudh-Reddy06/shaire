@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../services/bill_service.dart';
+import '../providers/currency_provider.dart'; // Add this import
+import 'package:provider/provider.dart'; // Add this if not already imported
 
 class AddExpenseScreen extends StatefulWidget {
   const AddExpenseScreen({super.key});
@@ -15,9 +17,15 @@ class AddExpenseScreen extends StatefulWidget {
 class _AddExpenseScreenState extends State<AddExpenseScreen> {
   // Form key for validation
   final _formKey = GlobalKey<FormState>();
-  
+
   // Selected friends/group
-  final List<String> _availableFriends = ['Alex', 'Bailey', 'Charlie', 'Dana', 'Evan'];
+  final List<String> _availableFriends = [
+    'Alex',
+    'Bailey',
+    'Charlie',
+    'Dana',
+    'Evan'
+  ];
   final List<String> _selectedFriends = [];
 
   // Form fields
@@ -25,18 +33,18 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   DateTime _selectedDate = DateTime.now();
   String? _selectedCategory;
   final TextEditingController _totalAmountController = TextEditingController();
-  
+
   // Manual entry mode
   bool _manualEntryMode = false;
-  
+
   // Available categories
   final List<String> _categories = [
-    'Food & Drinks', 
-    'Transportation', 
-    'Entertainment', 
-    'Shopping', 
-    'Utilities', 
-    'Rent', 
+    'Food & Drinks',
+    'Transportation',
+    'Entertainment',
+    'Shopping',
+    'Utilities',
+    'Rent',
     'Other'
   ];
 
@@ -203,9 +211,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.attach_money),
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d+\.?\d{0,2}')),
                       ],
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -232,7 +242,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                             IconButton(
                               icon: const Icon(Icons.people_alt),
                               tooltip: 'Batch assignment',
-                              onPressed: _billEntries.isNotEmpty ? _showBatchAssignmentOptions : null,
+                              onPressed: _billEntries.isNotEmpty
+                                  ? _showBatchAssignmentOptions
+                                  : null,
                             ),
                             const SizedBox(width: 8),
                             ElevatedButton.icon(
@@ -250,7 +262,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // List of bill entries
                     ..._buildBillEntries(),
                   ],
@@ -290,6 +302,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   }
 
   List<Widget> _buildBillEntries() {
+    // Add currency provider
+    final currencyProvider = Provider.of<CurrencyProvider>(context);
+
     if (_billEntries.isEmpty) {
       return [
         const Center(
@@ -304,7 +319,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     return _billEntries.asMap().entries.map((entry) {
       final index = entry.key;
       final billEntry = entry.value;
-      
+
       return Card(
         margin: const EdgeInsets.only(bottom: 12.0),
         child: Padding(
@@ -321,7 +336,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                     ),
                   ),
                   Text(
-                    '\$${billEntry.amount.toStringAsFixed(2)}',
+                    currencyProvider
+                        .format(billEntry.amount), // Use format method
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   IconButton(
@@ -356,7 +372,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
-    
+
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
@@ -366,7 +382,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   Future<void> _scanReceipt() async {
     final ImagePicker picker = ImagePicker();
-    
+
     try {
       // Show options dialog
       showDialog(
@@ -400,14 +416,16 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error accessing camera or gallery: $e')),
+        SnackBar(
+            content: Text('Error accessing camera or gallery: $e'),
+            behavior: SnackBarBehavior.floating),
       );
     }
   }
 
   Future<void> _getImageAndProcess(ImageSource source) async {
     final ImagePicker picker = ImagePicker();
-    
+
     try {
       // Check server health first
       //final bool isServerHealthy = await _billService.checkServerHealth();
@@ -417,43 +435,45 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       //  );
       //  return;
       //}
-      
+
       // Pick an image
       final XFile? pickedFile = await picker.pickImage(source: source);
-      
+
       if (pickedFile == null) {
         // User canceled image picking
         return;
       }
-      
+
       // Show loading indicator
       setState(() {
         _isLoading = true;
       });
-      
+
       // Process image
       File imageFile = File(pickedFile.path);
-      Map<String, dynamic> result = await _billService.extractBillInfo(imageFile);
-      
+      Map<String, dynamic> result =
+          await _billService.extractBillInfo(imageFile);
+
       // Hide loading indicator
       setState(() {
         _isLoading = false;
         // Switch to manual mode to show the entries
         _manualEntryMode = true;
       });
-      
+
       // Process bill items from the result
       if (result.containsKey('items') && result['items'] is List) {
         List<dynamic> items = result['items'];
-        
+
         // Clear existing bill entries if there are any
         _billEntries.clear();
-        
+
         // Populate description field if available
-        if (result.containsKey('merchant_name') && result['merchant_name'] != null) {
+        if (result.containsKey('merchant_name') &&
+            result['merchant_name'] != null) {
           _descriptionController.text = result['merchant_name'];
         }
-        
+
         // Populate date field if available
         if (result.containsKey('date') && result['date'] != null) {
           try {
@@ -462,12 +482,13 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
             // If date parsing fails, keep the current date
           }
         }
-        
+
         // Populate total amount if available
-        if (result.containsKey('total_amount') && result['total_amount'] != null) {
+        if (result.containsKey('total_amount') &&
+            result['total_amount'] != null) {
           _totalAmountController.text = result['total_amount'].toString();
         }
-        
+
         // Add bill entries from items
         for (var item in items) {
           if (item.containsKey('description') && item.containsKey('amount')) {
@@ -476,7 +497,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               amount: double.tryParse(item['amount'].toString()) ?? 0.0,
               assignedTo: [], // Start with empty list instead of auto-assigning
             );
-            
+
             setState(() {
               _billEntries.add(newEntry);
             });
@@ -487,19 +508,21 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         if (_billEntries.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Receipt processed! Please assign people to each item.'),
-              duration: Duration(seconds: 3),
-            ),
+                content: Text(
+                    'Receipt processed! Please assign people to each item.'),
+                duration: Duration(seconds: 3),
+                behavior: SnackBarBehavior.floating),
           );
         }
-        
+
         // Try to guess category based on merchant name or items
         _guessCategory();
-        
       } else {
         // Show error if no items were found
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not extract items from receipt')),
+          const SnackBar(
+              content: Text('Could not extract items from receipt'),
+              behavior: SnackBarBehavior.floating),
         );
       }
     } catch (e) {
@@ -507,7 +530,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       setState(() {
         _isLoading = false;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error processing receipt: $e')),
       );
@@ -516,26 +539,26 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   void _guessCategory() {
     final String description = _descriptionController.text.toLowerCase();
-    
-    if (description.contains('restaurant') || 
-        description.contains('café') || 
+
+    if (description.contains('restaurant') ||
+        description.contains('café') ||
         description.contains('cafe') ||
         description.contains('bar') ||
         description.contains('grill')) {
       _selectedCategory = 'Food & Drinks';
-    } else if (description.contains('taxi') || 
-               description.contains('uber') || 
-               description.contains('lyft') ||
-               description.contains('transport')) {
+    } else if (description.contains('taxi') ||
+        description.contains('uber') ||
+        description.contains('lyft') ||
+        description.contains('transport')) {
       _selectedCategory = 'Transportation';
-    } else if (description.contains('cinema') || 
-               description.contains('movie') || 
-               description.contains('theatre') ||
-               description.contains('theater')) {
+    } else if (description.contains('cinema') ||
+        description.contains('movie') ||
+        description.contains('theatre') ||
+        description.contains('theater')) {
       _selectedCategory = 'Entertainment';
-    } else if (description.contains('market') || 
-               description.contains('shop') || 
-               description.contains('store')) {
+    } else if (description.contains('market') ||
+        description.contains('shop') ||
+        description.contains('store')) {
       _selectedCategory = 'Shopping';
     } else {
       // Default to Other if no match
@@ -548,7 +571,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       context: context,
       isScrollControlled: true,
       builder: (context) => _AddBillEntryBottomSheet(
-        availableFriends: _selectedFriends.isEmpty ? _availableFriends : _selectedFriends,
+        availableFriends:
+            _selectedFriends.isEmpty ? _availableFriends : _selectedFriends,
         onAdd: (entry) {
           setState(() {
             _billEntries.add(entry);
@@ -566,7 +590,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   void _editBillEntry(int index) {
     final entry = _billEntries[index];
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -587,7 +611,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     if (_formKey.currentState!.validate()) {
       // TODO: Save expense to database or state management
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Expense saved!')),
+        const SnackBar(
+            content: Text('Expense saved!'),
+            behavior: SnackBarBehavior.floating),
       );
       Navigator.pop(context);
     }
@@ -629,7 +655,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               enabled: _selectedFriends.isNotEmpty,
               onTap: () {
                 if (_selectedFriends.isEmpty) return;
-                
+
                 for (int i = 0; i < _billEntries.length; i++) {
                   setState(() {
                     _billEntries[i] = BillEntry(
@@ -680,7 +706,8 @@ class _AddBillEntryBottomSheet extends StatefulWidget {
   });
 
   @override
-  _AddBillEntryBottomSheetState createState() => _AddBillEntryBottomSheetState();
+  _AddBillEntryBottomSheetState createState() =>
+      _AddBillEntryBottomSheetState();
 }
 
 class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
@@ -692,7 +719,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
   @override
   void initState() {
     super.initState();
-    
+
     // Pre-populate form if editing an existing entry
     if (widget.initialEntry != null) {
       _descriptionController.text = widget.initialEntry!.description;
@@ -710,6 +737,9 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // Access the currency provider
+    final currencyProvider = Provider.of<CurrencyProvider>(context);
+
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -744,12 +774,14 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _amountController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Amount',
-                border: OutlineInputBorder(),
-                prefixText: '\$',
+                border: const OutlineInputBorder(),
+                prefixText:
+                    currencyProvider.currencySymbol, // Use currency symbol
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
               ],
@@ -798,17 +830,20 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
                   if (_formKey.currentState!.validate()) {
                     if (_selectedFriends.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please assign this item to at least one person')),
+                        const SnackBar(
+                            content: Text(
+                                'Please assign this item to at least one person'),
+                            behavior: SnackBarBehavior.floating),
                       );
                       return;
                     }
-                    
+
                     final newEntry = BillEntry(
                       description: _descriptionController.text,
                       amount: double.parse(_amountController.text),
                       assignedTo: List.from(_selectedFriends),
                     );
-                    
+
                     widget.onAdd(newEntry);
                     Navigator.pop(context);
                   }

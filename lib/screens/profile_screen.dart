@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shaire/theme/theme.dart';
 import 'package:provider/provider.dart';
-
+import '../providers/currency_provider.dart'; // Make sure to include this import
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -17,7 +17,7 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 24),
             _buildProfileInfo(),
             const SizedBox(height: 24),
-            _buildPaymentInfo(),
+            _buildPaymentInfo(context), // Pass context here
           ],
         ),
       ),
@@ -39,7 +39,8 @@ class ProfileScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Profile Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text('Profile Information',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             _buildInfoRow('Name', 'John Doe'),
             _buildInfoRow('Username', '@johndoe'),
@@ -57,16 +58,52 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPaymentInfo() {
+  Widget _buildPaymentInfo(BuildContext context) {
+    // Get the currency provider
+    final currencyProvider = Provider.of<CurrencyProvider>(context);
+
+    // Find which currency code matches the current symbol
+    final String currencyCode = CurrencyProvider.availableCurrencies.entries
+        .firstWhere((entry) => entry.value == currencyProvider.currencySymbol,
+            orElse: () => const MapEntry('INR', '₹'))
+        .key;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Payment Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text('Payment Information',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            _buildInfoRow('Currency', 'USD'),
+
+            // Currency dropdown with current value
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Currency',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  DropdownButton<String>(
+                    value: currencyCode,
+                    items: CurrencyProvider.availableCurrencies.entries
+                        .map((entry) => DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: Text("${entry.key} (${entry.value})"),
+                            ))
+                        .toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        currencyProvider.setCurrency(newValue);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+
             _buildInfoRow('UPI ID', 'johndoe@upi'),
             const SizedBox(height: 16),
             ElevatedButton(
@@ -120,6 +157,38 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
           ),
+          // Add currency selector in settings
+          Consumer<CurrencyProvider>(
+            builder: (context, currencyProvider, child) {
+              // Find current currency code
+              final String currencyCode = CurrencyProvider
+                  .availableCurrencies.entries
+                  .firstWhere(
+                      (entry) => entry.value == currencyProvider.currencySymbol,
+                      orElse: () => const MapEntry('INR', '₹'))
+                  .key;
+
+              return ListTile(
+                leading: const Icon(Icons.currency_exchange),
+                title: const Text('Currency'),
+                subtitle: Text(
+                    'Current: $currencyCode (${currencyProvider.currencySymbol})'),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (String currency) {
+                    currencyProvider.setCurrency(currency);
+                  },
+                  itemBuilder: (BuildContext context) {
+                    return CurrencyProvider.availableCurrencies.entries
+                        .map((entry) => PopupMenuItem<String>(
+                              value: entry.key,
+                              child: Text("${entry.key} (${entry.value})"),
+                            ))
+                        .toList();
+                  },
+                ),
+              );
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.exit_to_app),
             title: const Text('Sign Out'),
@@ -157,5 +226,3 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 }
-
-
