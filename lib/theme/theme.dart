@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AppTheme {
   // Define common colors
@@ -391,17 +392,29 @@ class AppTheme {
 }
 
 class ThemeNotifier extends ChangeNotifier {
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = ThemeMode.light;
 
   ThemeMode get themeMode => _themeMode;
 
-  void setThemeMode(ThemeMode mode) {
-    _themeMode = mode;
+  ThemeNotifier() {
+    _loadThemeFromPreferences();
+  }
+
+  void toggleTheme() async {
+    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    notifyListeners();
+    await _saveThemeToPreferences();
+  }
+
+  Future<void> _loadThemeFromPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isDarkMode = prefs.getBool('isDarkMode') ?? false;
+    _themeMode = isDarkMode ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
   }
 
-  void toggleTheme() {
-    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    notifyListeners();
+  Future<void> _saveThemeToPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setBool('isDarkMode', _themeMode == ThemeMode.dark);
   }
 }
