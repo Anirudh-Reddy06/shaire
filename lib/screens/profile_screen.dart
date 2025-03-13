@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shaire/theme/theme.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/currency_provider.dart'; // Make sure to include this import
 
 class ProfileScreen extends StatelessWidget {
@@ -134,6 +135,16 @@ class ProfileScreen extends StatelessWidget {
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+  Future<void> _signOut(BuildContext context) async {
+    try {
+      await Supabase.instance.client.auth.signOut();
+      Navigator.pushNamedAndRemoveUntil(context, '/auth', (route) => false);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error signing out: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -210,9 +221,7 @@ class SettingsScreen extends StatelessWidget {
                       TextButton(
                         child: const Text('Sign Out'),
                         onPressed: () {
-                          // TODO: Implement actual sign out logic
-                          Navigator.of(context).pop();
-                          // Navigate back to login screen or home
+                          _signOut(context);
                         },
                       ),
                     ],
@@ -224,5 +233,49 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Future<Map<String, dynamic>> fetchUserProfile() async {
+  final user = Supabase.instance.client.auth.currentUser;
+
+  if (user == null) {
+    throw Exception('No user is logged in');
+  }
+
+  try {
+    final response = await Supabase.instance.client
+        .from('profiles')
+        .select()
+        .eq('id', user.id)
+        .single();
+
+    return response;
+  } catch (error) {
+    if (error is PostgrestException) {
+      throw Exception(error.message);
+    } else {
+      throw Exception('Unexpected error occurred');
+    }
+  }
+}
+
+
+Future<void> updateUserProfile(Map<String, dynamic> updates) async {
+  final user = Supabase.instance.client.auth.currentUser;
+
+  if (user == null) {
+    throw Exception('No user is logged in');
+  }
+
+  updates['updated_at'] = DateTime.now().toIso8601String();
+
+  final response = await Supabase.instance.client
+      .from('profiles')
+      .update(updates)
+      .eq('id', user.id);
+
+  if (response.error != null) {
+    throw Exception(response.error!.message);
   }
 }
