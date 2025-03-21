@@ -6,6 +6,9 @@ import 'screens/expenses_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/theme.dart';
 import 'providers/currency_provider.dart';
+import 'providers/expense_provider.dart';
+import 'providers/group_provider.dart';
+import 'providers/user_spending_analytics_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -16,11 +19,15 @@ Future<void> main() async {
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlrY3Znd3RyZ2Jlb3J3ZHljcnhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1MTM3MDMsImV4cCI6MjA1NzA4OTcwM30.azV2oLxI813aNEfmrApta7h6PZ1sbo31NgQq4s6W2Eo',
   );
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => ThemeNotifier()),
         ChangeNotifierProvider(create: (context) => CurrencyProvider()),
+        ChangeNotifierProvider(create: (context) => GroupProvider()),
+        ChangeNotifierProvider(create: (context) => ExpenseProvider()),
+        ChangeNotifierProvider(create: (context) => AnalyticsProvider()),
       ],
       child: const MyApp(),
     ),
@@ -29,6 +36,7 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeNotifier>(
@@ -81,10 +89,10 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _usernameController = TextEditingController(); // For sign-up
-  final _confirmPasswordController = TextEditingController(); // For sign-up
+  final _usernameController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   bool _isLoading = false;
-  bool _isSignUp = false; // Toggle between login and sign-up
+  bool _isSignUp = false;
 
   Future<void> _signUp() async {
     if (_passwordController.text != _confirmPasswordController.text) {
@@ -101,15 +109,16 @@ class _AuthScreenState extends State<AuthScreen> {
         password: _passwordController.text,
         data: {'username': _usernameController.text},
       );
+
       if (response.user != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sign-up successful!')),
         );
-        setState(() => _isSignUp = false); // Switch back to login
+        setState(() => _isSignUp = false);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Error signing up: $e')),
       );
     } finally {
       setState(() => _isLoading = false);
@@ -123,6 +132,7 @@ class _AuthScreenState extends State<AuthScreen> {
         email: _emailController.text,
         password: _passwordController.text,
       );
+
       if (response.session != null) {
         Navigator.pushReplacementNamed(context, '/home');
       }
@@ -144,15 +154,9 @@ class _AuthScreenState extends State<AuthScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // App Logo
-            Image.asset(
-              'assets/images/logo.png',
-              height: 120,
-              width: 120,
-            ),
+            Image.asset('assets/images/logo.png', height: 120, width: 120),
             const SizedBox(height: 24),
 
-            // Username Field (Only for Sign-Up)
             if (_isSignUp)
               TextField(
                 controller: _usernameController,
@@ -160,63 +164,53 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             const SizedBox(height: 16),
 
-            // Email Field
             TextField(
               controller: _emailController,
               decoration: const InputDecoration(labelText: 'Email'),
             ),
-            const SizedBox(height: 16), // Spacing
+            const SizedBox(height: 16),
 
-            // Password Field
             TextField(
               controller: _passwordController,
               decoration: const InputDecoration(labelText: 'Password'),
               obscureText: true,
             ),
 
-            // Confirm Password Field (Only for Sign-Up)
             if (_isSignUp)
               Padding(
                 padding: const EdgeInsets.only(top: 16.0),
                 child: TextField(
                   controller: _confirmPasswordController,
-                  decoration:
-                      const InputDecoration(labelText: 'Confirm Password'),
+                  decoration: const InputDecoration(labelText: 'Confirm Password'),
                   obscureText: true,
                 ),
               ),
             const SizedBox(height: 24),
 
-            // Sign In / Sign Up Buttons
             if (_isLoading)
               const CircularProgressIndicator()
             else
               ElevatedButton(
                 onPressed: _isSignUp ? _signUp : _signIn,
-                child:
-                    Text(_isSignUp ? 'Sign Up' : 'Sign In'), // Dynamic button text
+                child: Text(_isSignUp ? 'Sign Up' : 'Sign In'),
               ),
             const SizedBox(height: 16),
 
-            // Toggle Between Login and Sign-Up
             GestureDetector(
               onTap: () {
                 setState(() => _isSignUp = !_isSignUp);
               },
               child: Text.rich(
                 TextSpan(
-                  text:
-                      _isSignUp ? 'Already have an account? ' : "Don't have an account? ",
+                  text: _isSignUp ? 'Already have an account? ' : "Don't have an account? ",
                   children: [
                     TextSpan(
                       text: _isSignUp ? 'Sign In!' : 'Sign Up!',
-                      style:
-                          const TextStyle(decoration: TextDecoration.underline),
+                      style: const TextStyle(decoration: TextDecoration.underline),
                     ),
                   ],
                 ),
-                style:
-                    Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
               ),
             ),
           ],
