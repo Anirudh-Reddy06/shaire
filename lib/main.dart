@@ -4,7 +4,6 @@ import 'screens/groups_screen.dart';
 import 'screens/add_expense_screen.dart';
 import 'screens/expenses_screen.dart';
 import 'screens/profile_screen.dart';
-import 'screens/auth_screen.dart';
 import 'screens/landing_screen.dart';
 import 'theme/theme.dart';
 import 'providers/currency_provider.dart';
@@ -60,7 +59,7 @@ class MyApp extends StatelessWidget {
             if (settings.name == '/auth') {
               final bool isSignUp = settings.arguments as bool? ?? false;
               return MaterialPageRoute(
-                builder: (context) => AuthScreen(isSignUp: isSignUp),
+                builder: (context) => LandingScreen(),
               );
             }
             return null;
@@ -97,13 +96,19 @@ class _SplashScreenState extends State<SplashScreen> {
       } else {
         Navigator.pushReplacementNamed(context, '/home');
       }
-    });
+    }
+  }
 
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),  // Show a loading indicator during splash
+      ),
     );
   }
 }
+
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
