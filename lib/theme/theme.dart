@@ -5,27 +5,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class AppTheme {
   // Define common colors
-  static const Color primaryColor = Color(0xFF99CF70); 
-  static const Color primaryDarkColor = Color(0xFF85B762); 
-  static const Color accentColor = Color(0xFFBBE3A3); 
-  static const Color errorColor = Color(0xFFE53935); 
-  
+  static const Color primaryColor = Color(0xFF99CF70);
+  static const Color primaryDarkColor = Color(0xFF85B762);
+  static const Color accentColor = Color(0xFFBBE3A3);
+  static const Color errorColor = Color(0xFFE53935);
+
   // Light theme colors
-  static const Color _lightTextPrimaryColor = Color(0xFF161616); // Dark text in light mode
-  static const Color _lightTextSecondaryColor = Color(0xFF555555); // Secondary text in light mode
-  static const Color _lightBackgroundColor = Color.fromARGB(255, 238, 241, 237); // Light background 
+  static const Color _lightTextPrimaryColor =
+      Color(0xFF161616); // Dark text in light mode
+  static const Color _lightTextSecondaryColor =
+      Color(0xFF555555); // Secondary text in light mode
+  static const Color _lightBackgroundColor =
+      Color.fromARGB(255, 238, 241, 237); // Light background
   static const Color _lightCardColor = Colors.white;
   static const Color _lightDividerColor = Color(0xFFDDDDDD);
-  
+
   // Dark theme colors
-  static const Color _darkTextPrimaryColor = Color(0xFFE2E7E0); // Light text in dark mode
-  static const Color _darkTextSecondaryColor = Color(0xFFAAAAAA); // Secondary text in dark mode
-  static const Color _darkBackgroundColor = Color(0xFF161616); // Dark background you requested
-  static const Color _darkCardColor = Color(0xFF212121); // Slightly lighter than background for cards
+  static const Color _darkTextPrimaryColor =
+      Color(0xFFE2E7E0); // Light text in dark mode
+  static const Color _darkTextSecondaryColor =
+      Color(0xFFAAAAAA); // Secondary text in dark mode
+  static const Color _darkBackgroundColor =
+      Color(0xFF161616); // Dark background you requested
+  static const Color _darkCardColor =
+      Color(0xFF212121); // Slightly lighter than background for cards
   static const Color _darkDividerColor = Color(0xFF424242);
 
   // Define text themes
-  static TextTheme _buildTextTheme(TextTheme base, Color textColor, Color secondaryTextColor) {
+  static TextTheme _buildTextTheme(
+      TextTheme base, Color textColor, Color secondaryTextColor) {
     return base.copyWith(
       // Headings - Using Outfit font
       displayLarge: GoogleFonts.outfit(
@@ -257,7 +265,7 @@ class AppTheme {
       primary: primaryColor,
       secondary: accentColor,
       error: errorColor,
-      onPrimary: _lightTextPrimaryColor, // Dark text on primary buttons 
+      onPrimary: _lightTextPrimaryColor, // Dark text on primary buttons
       onSecondary: _lightTextPrimaryColor,
       onError: _lightTextPrimaryColor,
       surface: _darkCardColor,
@@ -401,7 +409,8 @@ class ThemeNotifier extends ChangeNotifier {
   }
 
   void toggleTheme() async {
-    _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    _themeMode =
+        _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
     await _saveThemeToPreferences();
   }

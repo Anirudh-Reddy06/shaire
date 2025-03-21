@@ -55,8 +55,34 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   bool _isLoading = false;
   final BillService _billService = BillService();
 
+  // Add these variables to _AddExpenseScreenState class
+  final TextEditingController _friendSearchController = TextEditingController();
+  String _friendSearchQuery = '';
+
+  // Add this list for recent groups/friends
+  final List<Map<String, dynamic>> _recentContactsAndGroups = [
+    {'name': 'Roommates', 'isGroup': true},
+    {'name': 'Alex', 'isGroup': false},
+    {'name': 'Lunch Group', 'isGroup': true},
+    {'name': 'Bailey', 'isGroup': false},
+    {'name': 'Weekend Trip', 'isGroup': true},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _friendSearchController.addListener(_updateFriendSearchQuery);
+  }
+
+  void _updateFriendSearchQuery() {
+    setState(() {
+      _friendSearchQuery = _friendSearchController.text;
+    });
+  }
+
   @override
   void dispose() {
+    _friendSearchController.dispose();
     _descriptionController.dispose();
     _totalAmountController.dispose();
     super.dispose();
@@ -97,13 +123,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               Center(
                 child: ElevatedButton.icon(
                   onPressed: _scanReceipt,
-                  icon: const Icon(Icons.document_scanner, color: Colors.white),
+                  icon: Icon(Icons.document_scanner),
                   label: const Text('Scan Receipt'),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(200, 50),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),
                 ),
               ),
@@ -275,32 +303,134 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     );
   }
 
+  // Replace the current _buildFriendsSelection method with this enhanced version:
   Widget _buildFriendsSelection() {
-    return Wrap(
-      spacing: 8.0,
-      runSpacing: 8.0,
-      children: _availableFriends.map((friend) {
-        final isSelected = _selectedFriends.contains(friend);
-        return FilterChip(
-          label: Text(friend),
-          selected: isSelected,
-          onSelected: (selected) {
-            setState(() {
-              if (selected) {
-                _selectedFriends.add(friend);
-              } else {
-                _selectedFriends.remove(friend);
-              }
-            });
-          },
-          avatar: isSelected ? const Icon(Icons.check, size: 16) : null,
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          selectedColor: Theme.of(context).colorScheme.primaryContainer,
-        );
-      }).toList(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Search bar
+        TextField(
+          controller: _friendSearchController,
+          decoration: InputDecoration(
+            hintText: 'Search friends or groups',
+            prefixIcon: const Icon(Icons.search),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            filled: true,
+            fillColor: Theme.of(context).brightness == Brightness.dark
+                ? Theme.of(context).cardColor.withOpacity(0.5)
+                : Colors.grey.shade200,
+          ),
+        ),
+
+        // Recent contacts/groups section
+        if (_friendSearchQuery.isEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Recent',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 56,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _recentContactsAndGroups.length,
+              itemBuilder: (context, index) {
+                final contact = _recentContactsAndGroups[index];
+                final isSelected = _selectedFriends.contains(contact['name']);
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (isSelected) {
+                          _selectedFriends.remove(contact['name']);
+                        } else {
+                          _selectedFriends.add(contact['name']);
+                        }
+                      });
+                    },
+                    child: Chip(
+                      avatar: CircleAvatar(
+                        backgroundColor: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                        child: Icon(
+                          contact['isGroup'] ? Icons.group : Icons.person,
+                          size: 16,
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      label: Text(contact['name']),
+                      backgroundColor: isSelected
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Theme.of(context).colorScheme.surface,
+                      side: BorderSide(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context)
+                                .colorScheme
+                                .outline
+                                .withOpacity(0.5),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 16),
+        Text(
+          'All Friends',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+
+        // Filtered friends list
+        Wrap(
+          spacing: 8.0,
+          runSpacing: 8.0,
+          children: _availableFriends
+              .where((friend) =>
+                  _friendSearchQuery.isEmpty ||
+                  friend
+                      .toLowerCase()
+                      .contains(_friendSearchQuery.toLowerCase()))
+              .map((friend) {
+            final isSelected = _selectedFriends.contains(friend);
+            return FilterChip(
+              label: Text(friend),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    _selectedFriends.add(friend);
+                  } else {
+                    _selectedFriends.remove(friend);
+                  }
+                });
+              },
+              avatar: isSelected ? const Icon(Icons.check, size: 16) : null,
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              selectedColor: Theme.of(context).colorScheme.primaryContainer,
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 
+  // Update the _buildBillEntries method to group by type
   List<Widget> _buildBillEntries() {
     // Add currency provider
     final currencyProvider = Provider.of<CurrencyProvider>(context);
@@ -316,8 +446,54 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       ];
     }
 
-    return _billEntries.asMap().entries.map((entry) {
-      final index = entry.key;
+    // Group entries by type
+    final itemEntries =
+        _billEntries.where((e) => e.type == BillEntryType.item).toList();
+    final taxEntries =
+        _billEntries.where((e) => e.type == BillEntryType.tax).toList();
+    final discountEntries =
+        _billEntries.where((e) => e.type == BillEntryType.discount).toList();
+
+    // Combined widgets list
+    List<Widget> widgets = [];
+
+    // Items section
+    if (itemEntries.isNotEmpty) {
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+        child: Text('Items', style: Theme.of(context).textTheme.titleMedium),
+      ));
+      widgets.addAll(_buildEntriesByType(itemEntries, currencyProvider));
+    }
+
+    // Tax section
+    if (taxEntries.isNotEmpty) {
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+        child: Text('Tax', style: Theme.of(context).textTheme.titleMedium),
+      ));
+      widgets.addAll(_buildEntriesByType(taxEntries, currencyProvider));
+    }
+
+    // Discount section
+    if (discountEntries.isNotEmpty) {
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+        child:
+            Text('Discounts', style: Theme.of(context).textTheme.titleMedium),
+      ));
+      widgets.addAll(_buildEntriesByType(discountEntries, currencyProvider));
+    }
+
+    return widgets;
+  }
+
+  // Helper method to build entries of a specific type
+  List<Widget> _buildEntriesByType(
+      List<BillEntry> entries, CurrencyProvider currencyProvider) {
+    return entries.asMap().entries.map((entry) {
+      final index = _billEntries
+          .indexOf(entry.value); // Get the index in the original list
       final billEntry = entry.value;
 
       return Card(
@@ -336,9 +512,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                     ),
                   ),
                   Text(
-                    currencyProvider
-                        .format(billEntry.amount), // Use format method
-                    style: Theme.of(context).textTheme.titleMedium,
+                    currencyProvider.format(billEntry.amount),
+                    style: TextStyle(
+                      fontSize:
+                          Theme.of(context).textTheme.titleMedium?.fontSize,
+                      fontWeight: FontWeight.bold,
+                      color: billEntry.type == BillEntryType.discount
+                          ? Colors.green
+                          : null,
+                    ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.edit_outlined),
@@ -492,10 +674,33 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         // Add bill entries from items
         for (var item in items) {
           if (item.containsKey('description') && item.containsKey('amount')) {
+            // Determine if this is a tax, discount, or regular item
+            BillEntryType entryType = BillEntryType.item;
+
+            String desc = item['description'].toString().toLowerCase();
+            double itemAmount =
+                double.tryParse(item['amount'].toString()) ?? 0.0;
+
+            if (desc.contains('tax') ||
+                desc.contains('gst') ||
+                desc.contains('vat')) {
+              entryType = BillEntryType.tax;
+            } else if (desc.contains('discount') ||
+                desc.contains('coupon') ||
+                desc.contains('offer') ||
+                itemAmount < 0) {
+              entryType = BillEntryType.discount;
+              // Ensure discount amounts are positive for display purposes, but handled as negative in calculations
+              if (itemAmount < 0) {
+                itemAmount = itemAmount.abs();
+              }
+            }
+
             final newEntry = BillEntry(
               description: item['description'],
-              amount: double.tryParse(item['amount'].toString()) ?? 0.0,
-              assignedTo: [], // Start with empty list instead of auto-assigning
+              amount: itemAmount,
+              assignedTo: [], // Empty list initially
+              type: entryType,
             );
 
             setState(() {
@@ -710,11 +915,13 @@ class _AddBillEntryBottomSheet extends StatefulWidget {
       _AddBillEntryBottomSheetState();
 }
 
+// Update the _AddBillEntryBottomSheetState class
 class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
   List<String> _selectedFriends = [];
+  BillEntryType _selectedType = BillEntryType.item;
 
   @override
   void initState() {
@@ -725,14 +932,8 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
       _descriptionController.text = widget.initialEntry!.description;
       _amountController.text = widget.initialEntry!.amount.toString();
       _selectedFriends = List.from(widget.initialEntry!.assignedTo);
+      _selectedType = widget.initialEntry!.type;
     }
-  }
-
-  @override
-  void dispose() {
-    _descriptionController.dispose();
-    _amountController.dispose();
-    super.dispose();
   }
 
   @override
@@ -754,7 +955,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.title, // Use the customized title
+              widget.title,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 16),
@@ -772,13 +973,49 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
               },
             ),
             const SizedBox(height: 16),
+
+            // Entry type selector
+            DropdownButtonFormField<BillEntryType>(
+              value: _selectedType,
+              decoration: const InputDecoration(
+                labelText: 'Entry Type',
+                border: OutlineInputBorder(),
+              ),
+              items: BillEntryType.values.map((type) {
+                String label;
+                switch (type) {
+                  case BillEntryType.item:
+                    label = 'Item';
+                    break;
+                  case BillEntryType.tax:
+                    label = 'Tax';
+                    break;
+                  case BillEntryType.discount:
+                    label = 'Discount';
+                    break;
+                }
+
+                return DropdownMenuItem<BillEntryType>(
+                  value: type,
+                  child: Text(label),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _selectedType = value;
+                  });
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+
             TextFormField(
               controller: _amountController,
               decoration: InputDecoration(
                 labelText: 'Amount',
                 border: const OutlineInputBorder(),
-                prefixText:
-                    currencyProvider.currencySymbol, // Use currency symbol
+                prefixText: currencyProvider.currencySymbol,
               ),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -842,6 +1079,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
                       description: _descriptionController.text,
                       amount: double.parse(_amountController.text),
                       assignedTo: List.from(_selectedFriends),
+                      type: _selectedType,
                     );
 
                     widget.onAdd(newEntry);
@@ -854,7 +1092,8 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text('Add Item'),
+                child: Text(
+                    widget.initialEntry != null ? 'Update Item' : 'Add Item'),
               ),
             ),
             const SizedBox(height: 16),
@@ -866,14 +1105,20 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
 }
 
 // Model class for bill entries
+// Add this enum above the BillEntry class
+enum BillEntryType { item, tax, discount }
+
+// Update the BillEntry class to include a type property
 class BillEntry {
   final String description;
   final double amount;
   final List<String> assignedTo;
+  final BillEntryType type;
 
   BillEntry({
     required this.description,
     required this.amount,
     required this.assignedTo,
+    this.type = BillEntryType.item,
   });
 }

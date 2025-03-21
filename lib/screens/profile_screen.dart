@@ -2,38 +2,104 @@ import 'package:flutter/material.dart';
 import 'package:shaire/theme/theme.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../providers/currency_provider.dart'; // Make sure to include this import
+import '../providers/currency_provider.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  late Future<Map<String, dynamic>> _userProfileFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _userProfileFuture = fetchUserProfile();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _buildProfilePhoto(),
-            const SizedBox(height: 24),
-            _buildProfileInfo(),
-            const SizedBox(height: 24),
-            _buildPaymentInfo(context), // Pass context here
-          ],
+        child: FutureBuilder<Map<String, dynamic>>(
+          future: _userProfileFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: CircularProgressIndicator(),
+                ),
+              );
+            } else if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.error_outline,
+                          size: 60, color: Colors.red),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Error loading profile: ${snapshot.error}',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _userProfileFuture = fetchUserProfile();
+                          });
+                        },
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            } else {
+              final userData = snapshot.data!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _buildProfilePhoto(userData),
+                  const SizedBox(height: 24),
+                  _buildProfileInfo(userData),
+                  const SizedBox(height: 24),
+                  _buildPaymentInfo(context, userData),
+                ],
+              );
+            }
+          },
         ),
       ),
     );
   }
 
-  Widget _buildProfilePhoto() {
+  Widget _buildProfilePhoto(Map<String, dynamic> userData) {
+    final String? avatarUrl = userData['avatar_url'];
+
     return CircleAvatar(
       radius: 60,
       backgroundColor: Colors.grey[300],
-      child: Icon(Icons.person, size: 80, color: Colors.grey[600]),
+      backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
+          ? NetworkImage(avatarUrl)
+          : null,
+      child: avatarUrl == null || avatarUrl.isEmpty
+          ? Icon(Icons.person, size: 80, color: Colors.grey[600])
+          : null,
     );
   }
 
-  Widget _buildProfileInfo() {
+  Widget _buildProfileInfo(Map<String, dynamic> userData) {
+    final String fullName = userData['full_name'] ?? 'Not set';
+    final String username = userData['username'] ?? 'Not set';
+    final String phone = userData['phone'] ?? 'Not set';
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -43,13 +109,16 @@ class ProfileScreen extends StatelessWidget {
             const Text('Profile Information',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            _buildInfoRow('Name', 'John Doe'),
-            _buildInfoRow('Username', '@johndoe'),
-            _buildInfoRow('Mobile Number', '+1 234 567 8900'),
+            _buildInfoRow('Name', fullName),
+            _buildInfoRow('Username', username),
+            _buildInfoRow('Mobile Number', phone),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
                 // Navigate to edit profile screen
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Edit profile coming soon')),
+                );
               },
               child: const Text('Edit Profile'),
             ),
@@ -59,9 +128,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPaymentInfo(BuildContext context) {
-    // Get the currency provider
+  Widget _buildPaymentInfo(
+      BuildContext context, Map<String, dynamic> userData) {
     final currencyProvider = Provider.of<CurrencyProvider>(context);
+    final String upiId = userData['upi_id'] ?? 'Not set';
 
     // Find which currency code matches the current symbol
     final String currencyCode = CurrencyProvider.availableCurrencies.entries
@@ -105,11 +175,15 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
 
-            _buildInfoRow('UPI ID', 'johndoe@upi'),
+            _buildInfoRow('UPI ID', upiId),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
                 // Navigate to edit payment info screen
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Edit payment info coming soon')),
+                );
               },
               child: const Text('Edit Payment Info'),
             ),
@@ -259,7 +333,6 @@ Future<Map<String, dynamic>> fetchUserProfile() async {
     }
   }
 }
-
 
 Future<void> updateUserProfile(Map<String, dynamic> updates) async {
   final user = Supabase.instance.client.auth.currentUser;
