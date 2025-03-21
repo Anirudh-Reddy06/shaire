@@ -4,6 +4,8 @@ import 'screens/groups_screen.dart';
 import 'screens/add_expense_screen.dart';
 import 'screens/expenses_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/auth_screen.dart';
+import 'screens/landing_screen.dart';
 import 'theme/theme.dart';
 import 'providers/currency_provider.dart';
 import 'providers/expense_provider.dart';
@@ -11,6 +13,7 @@ import 'providers/group_provider.dart';
 import 'providers/user_spending_analytics_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,8 +52,18 @@ class MyApp extends StatelessWidget {
           home: const SplashScreen(),
           debugShowCheckedModeBanner: false,
           routes: {
+            '/landing': (context) => const LandingScreen(),
             '/auth': (context) => const AuthScreen(),
             '/home': (context) => const MainScreen(),
+          },
+          onGenerateRoute: (settings) {
+            if (settings.name == '/auth') {
+              final bool isSignUp = settings.arguments as bool? ?? false;
+              return MaterialPageRoute(
+                builder: (context) => AuthScreen(isSignUp: isSignUp),
+              );
+            }
+            return null;
           },
         );
       },
@@ -58,16 +71,29 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthAndNavigate();
+  }
+
+  Future<void> _checkAuthAndNavigate() async {
+    // Use a short delay for the normal app flow
+    await Future.delayed(const Duration(seconds: 2));
+
     final session = Supabase.instance.client.auth.currentSession;
 
-    Future.delayed(const Duration(seconds: 2), () {
+    if (context.mounted) {
       if (session == null) {
-        Navigator.pushReplacementNamed(context, '/auth');
+        Navigator.pushReplacementNamed(context, '/landing');
       } else {
         Navigator.pushReplacementNamed(context, '/home');
       }
@@ -89,10 +115,10 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _usernameController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  final _usernameController = TextEditingController(); // For sign-up
+  final _confirmPasswordController = TextEditingController(); // For sign-up
   bool _isLoading = false;
-  bool _isSignUp = false;
+  bool _isSignUp = false; // Toggle between login and sign-up
 
   Future<void> _signUp() async {
     if (_passwordController.text != _confirmPasswordController.text) {
@@ -109,16 +135,15 @@ class _AuthScreenState extends State<AuthScreen> {
         password: _passwordController.text,
         data: {'username': _usernameController.text},
       );
-
       if (response.user != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sign-up successful!')),
         );
-        setState(() => _isSignUp = false);
+        setState(() => _isSignUp = false); // Switch back to login
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error signing up: $e')),
+        SnackBar(content: Text('Error: $e')),
       );
     } finally {
       setState(() => _isLoading = false);
@@ -132,7 +157,6 @@ class _AuthScreenState extends State<AuthScreen> {
         email: _emailController.text,
         password: _passwordController.text,
       );
-
       if (response.session != null) {
         Navigator.pushReplacementNamed(context, '/home');
       }
@@ -147,70 +171,37 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Welcome to Shaire!')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+      body: Center(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset('assets/images/logo.png', height: 120, width: 120),
-            const SizedBox(height: 24),
-
-            if (_isSignUp)
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(labelText: 'Username'),
-              ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email'),
+            const Spacer(),
+            // Logo in center - match size with landing page
+            SvgPicture.asset(
+              'assets/images/logo.svg',
+              height: 160,
+              width: 160,
             ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: _passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-
-            if (_isSignUp)
-              Padding(
-                padding: const EdgeInsets.only(top: 16.0),
-                child: TextField(
-                  controller: _confirmPasswordController,
-                  decoration: const InputDecoration(labelText: 'Confirm Password'),
-                  obscureText: true,
-                ),
-              ),
             const SizedBox(height: 24),
-
-            if (_isLoading)
-              const CircularProgressIndicator()
-            else
-              ElevatedButton(
-                onPressed: _isSignUp ? _signUp : _signIn,
-                child: Text(_isSignUp ? 'Sign Up' : 'Sign In'),
+            // "Shaire" text logo - match size with landing page
+            SvgPicture.asset(
+              'assets/images/logo_text.svg',
+              height: 50,
+              colorFilter: ColorFilter.mode(
+                primaryColor,
+                BlendMode.srcIn,
               ),
-            const SizedBox(height: 16),
-
-            GestureDetector(
-              onTap: () {
-                setState(() => _isSignUp = !_isSignUp);
-              },
-              child: Text.rich(
-                TextSpan(
-                  text: _isSignUp ? 'Already have an account? ' : "Don't have an account? ",
-                  children: [
-                    TextSpan(
-                      text: _isSignUp ? 'Sign In!' : 'Sign Up!',
-                      style: const TextStyle(decoration: TextDecoration.underline),
-                    ),
-                  ],
-                ),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
+            ),
+            const Spacer(),
+            // Loader at the bottom
+            Padding(
+              padding: const EdgeInsets.only(bottom: 80.0),
+              child: CircularProgressIndicator(
+                color: primaryColor,
+                strokeWidth: 3,
               ),
             ),
           ],
