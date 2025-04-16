@@ -1,45 +1,43 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:io';
+import 'package:uuid/uuid.dart';
+import 'package:path/path.dart' as path;
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
+import '../services/logger_service.dart';
 
 class Receipt {
   final int id;
-  final int expenseId;
-  final String? imageUrl;
-  final bool ocrProcessed;
-  final dynamic ocrData;
-  final DateTime? processedAt;
+  final String imageUrl;
+  final DateTime createdAt;
+  final int? expenseId;
+  final String userId;
 
   Receipt({
     required this.id,
-    required this.expenseId,
-    this.imageUrl,
-    required this.ocrProcessed,
-    required this.ocrData,
-    this.processedAt,
+    required this.imageUrl,
+    required this.createdAt,
+    this.expenseId,
+    required this.userId,
   });
 
-  /// Factory constructor to create a Receipt from JSON
   factory Receipt.fromJson(Map<String, dynamic> json) {
     return Receipt(
-      id: json['id'] as int,
-      expenseId: json['expense_id'] as int,
-      imageUrl: json['image_url'] as String?,
-      ocrProcessed: json['ocr_processed'] as bool,
-      ocrData: json['ocr_data'],  // Dynamic field, no cast needed
-      processedAt: json['processed_at'] != null
-          ? DateTime.parse(json['processed_at'])
-          : null,
+      id: json['id'],
+      imageUrl: json['image_url'],
+      createdAt: DateTime.parse(json['created_at']),
+      expenseId: json['expense_id'],
+      userId: json['user_id'],
     );
   }
 
-  /// Convert the Receipt object to JSON
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'expense_id': expenseId,
       'image_url': imageUrl,
-      'ocr_processed': ocrProcessed,
-      'ocr_data': ocrData,
-      'processed_at': processedAt?.toIso8601String(),
+      'created_at': createdAt.toIso8601String(),
+      'expense_id': expenseId,
+      'user_id': userId,
     };
   }
 }
@@ -83,6 +81,7 @@ class ReceiptService {
   /// Update an existing receipt
   Future<bool> updateReceipt(Receipt receipt) async {
     try {
+      // Make sure id is not null before using it
       await supabase
           .from('receipts')
           .update(receipt.toJson())
@@ -104,6 +103,104 @@ class ReceiptService {
       return true;
     } catch (error) {
       print('Error deleting receipt: $error');
+      return false;
+    }
+  }
+
+  /// Upload a receipt image and save to database
+  Future<Receipt?> uploadReceipt(File imageFile) async {
+    try {
+      final user = supabase.auth.currentUser;
+
+      if (user == null) {
+        LoggerService.error('User not authenticated');
+        throw Exception('User not authenticated');
+      }
+
+      // Compress the image first
+      LoggerService.info('Compressing receipt image');
+      final compressedFile = await _compressImage(imageFile);
+
+      // Generate a unique file name
+      final fileExt = path.extension(imageFile.path);
+      final fileName = '${const Uuid().v4()}$fileExt';
+
+      // Upload to Supabase Storage
+      LoggerService.info('Uploading receipt to storage: ${user.id}/$fileName');
+      await supabase.storage
+          .from('receipts')
+          .upload('${user.id}/$fileName', compressedFile);
+
+      // Get public URL for the uploaded file
+      final imageUrl = supabase.storage
+          .from('receipts')
+          .getPublicUrl('${user.id}/$fileName');
+      LoggerService.info('Receipt image URL: $imageUrl');
+
+      // Create receipt record in database
+      final now = DateTime.now();
+      final receiptData = {
+        'image_url': imageUrl,
+        'created_at': now.toIso8601String(),
+        'user_id': user.id
+      };
+
+      LoggerService.info('Creating receipt record in database');
+      final result =
+          await supabase.from('receipts').insert(receiptData).select().single();
+
+      LoggerService.info('Receipt created with ID: ${result['id']}');
+      return Receipt.fromJson(result);
+    } catch (e) {
+      LoggerService.error('Error uploading receipt', e);
+      return null;
+    }
+  }
+
+  // Compress image to reduce size
+  Future<File> _compressImage(File file) async {
+    final tempDir = await getTemporaryDirectory();
+    final targetPath =
+        '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}_compressed.jpg';
+
+    try {
+      // Log original file size
+      LoggerService.debug('Original image size: ${file.lengthSync()} bytes');
+
+      // Compress the file
+      final result = await FlutterImageCompress.compressAndGetFile(
+        file.absolute.path,
+        targetPath,
+        quality: 85,
+      );
+
+      // Check if compression was successful
+      if (result != null) {
+        // Convert XFile to File and check size
+        final compressedFile = File(result.path);
+        LoggerService.debug(
+            'Compressed image size: ${compressedFile.lengthSync()} bytes');
+        return compressedFile;
+      } else {
+        LoggerService.warning('Compression failed, using original file');
+        return file;
+      }
+    } catch (e) {
+      LoggerService.error('Error during compression', e);
+      return file; // Return original file on error
+    }
+  }
+
+  /// Link a receipt with an expense
+  Future<bool> linkReceiptToExpense(int receiptId, int expenseId) async {
+    try {
+      LoggerService.info('Linking receipt $receiptId to expense $expenseId');
+      await supabase
+          .from('receipts')
+          .update({'expense_id': expenseId}).eq('id', receiptId);
+      return true;
+    } catch (e) {
+      LoggerService.error('Error linking receipt to expense', e);
       return false;
     }
   }

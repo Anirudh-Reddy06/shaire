@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class CurrencyProvider extends ChangeNotifier {
   // Default currency is Indian Rupee
   String _currencySymbol = '₹';
-
+  String _currencyCode = 'INR';
   // Common currency symbols
   static const Map<String, String> availableCurrencies = {
     'INR': '₹', // Indian Rupee (default)
@@ -16,10 +16,12 @@ class CurrencyProvider extends ChangeNotifier {
   };
 
   String get currencySymbol => _currencySymbol;
+  String get currencyCode => _currencyCode;
 
   void setCurrency(String currencyCode) {
     if (availableCurrencies.containsKey(currencyCode)) {
       _currencySymbol = availableCurrencies[currencyCode]!;
+      _currencyCode = currencyCode;
       notifyListeners();
     }
   }

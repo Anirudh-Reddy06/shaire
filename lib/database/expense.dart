@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 
 class Expense {
   final int id;
@@ -31,18 +32,23 @@ class Expense {
 
   factory Expense.fromJson(Map<String, dynamic> json) {
     return Expense(
-      id: json['id'],
-      description: json['description'],
-      totalAmount: (json['total_amount'] as num).toDouble(),
-      currency: json['currency'],
-      date: DateTime.parse(json['date']),
-      createdBy: json['created_by'],
+      id: json['id'] ?? 0,
+      description: json['description'] ?? '',
+      totalAmount: (json['total_amount'] ?? 0.0).toDouble(),
+      currency: json['currency'] ?? 'INR',
+      date:
+          json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
+      createdBy: json['created_by'] ?? '',
       groupId: json['group_id'],
       categoryId: json['category_id'],
       receiptImageUrl: json['receipt_image_url'],
-      splitType: json['split_type'],
-      createdAt: DateTime.parse(json['created_at']),
-      updatedAt: DateTime.parse(json['updated_at']),
+      splitType: json['split_type'] ?? 'equal',
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'])
+          : DateTime.now(),
+      updatedAt: json['updated_at'] != null
+          ? DateTime.parse(json['updated_at'])
+          : DateTime.now(),
     );
   }
 
@@ -62,6 +68,31 @@ class Expense {
       'updated_at': updatedAt.toIso8601String(),
     };
   }
+
+  // Helper method to format the date in a human-readable way
+  String get formattedDate => DateFormat('MMM dd, yyyy').format(date);
+
+  // Helper method to get category name
+  String get categoryName {
+    switch (categoryId) {
+      case 1:
+        return 'Food & Drinks';
+      case 2:
+        return 'Transportation';
+      case 3:
+        return 'Entertainment';
+      case 4:
+        return 'Shopping';
+      case 5:
+        return 'Utilities';
+      case 6:
+        return 'Rent';
+      case 7:
+        return 'Other';
+      default:
+        return 'Other';
+    }
+  }
 }
 
 class ExpenseService {
@@ -74,7 +105,7 @@ class ExpenseService {
           .from('expenses')
           .select('*')
           .eq('id', id)
-          .maybeSingle();  // Fetch single or return null
+          .maybeSingle(); // Fetch single or return null
 
       if (response == null) {
         print('Expense not found');

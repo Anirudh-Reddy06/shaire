@@ -3,9 +3,17 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
+import 'package:shaire/database/expense.dart';
+import 'package:shaire/providers/expense_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/bill_service.dart';
-import '../providers/currency_provider.dart'; // Add this import
-import 'package:provider/provider.dart'; // Add this if not already imported
+import '../services/logger_service.dart';
+import '../providers/currency_provider.dart';
+import '../database/receipt.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   const AddExpenseScreen({super.key});
@@ -67,6 +75,10 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     {'name': 'Bailey', 'isGroup': false},
     {'name': 'Weekend Trip', 'isGroup': true},
   ];
+
+  // Add this property to your class
+  final ReceiptService _receiptService = ReceiptService();
+  int? _currentReceiptId;
 
   @override
   void initState() {
@@ -609,135 +621,80 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     final ImagePicker picker = ImagePicker();
 
     try {
-      // Check server health first
-      //final bool isServerHealthy = await _billService.checkServerHealth();
-      //if (!isServerHealthy) {
-      //  ScaffoldMessenger.of(context).showSnackBar(
-      //    const SnackBar(content: Text('Receipt scanning server is not available')),
-      //  );
-      //  return;
-      //}
-
-      // Pick an image
       final XFile? pickedFile = await picker.pickImage(source: source);
-
-      if (pickedFile == null) {
-        // User canceled image picking
-        return;
-      }
+      if (pickedFile == null) return;
 
       // Show loading indicator
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
 
-      // Process image
-      File imageFile = File(pickedFile.path);
-      Map<String, dynamic> result =
-          await _billService.extractBillInfo(imageFile);
+      // Use the original file
+      final file = File(pickedFile.path);
 
-      // Hide loading indicator
+      // Process the image with OCR
+      Map<String, dynamic> billResult = {};
+      Receipt? receipt;
+
+      try {
+        // First, upload the receipt to create a record
+        receipt = await _receiptService.uploadReceipt(file);
+        if (receipt != null) {
+          _currentReceiptId = receipt.id;
+        }
+
+        // Then try OCR processing
+        billResult = await _billService.extractBillInfo(file);
+      } catch (e) {
+        print('OCR extraction failed: $e');
+        billResult = {}; // Empty result if OCR fails
+      }
+
+      // Hide loading indicator and update UI
       setState(() {
         _isLoading = false;
-        // Switch to manual mode to show the entries
-        _manualEntryMode = true;
+        _manualEntryMode = true; // Show the BillEntries UI
       });
 
-      // Process bill items from the result
-      if (result.containsKey('items') && result['items'] is List) {
-        List<dynamic> items = result['items'];
+      // Process billResult to populate the form if OCR was successful
+      if (billResult.containsKey('items') && billResult['items'] is List) {
+        final items = billResult['items'] as List;
 
-        // Clear existing bill entries if there are any
+        // Clear existing entries before adding new ones
         _billEntries.clear();
 
-        // Populate description field if available
-        if (result.containsKey('merchant_name') &&
-            result['merchant_name'] != null) {
-          _descriptionController.text = result['merchant_name'];
-        }
-
-        // Populate date field if available
-        if (result.containsKey('date') && result['date'] != null) {
-          try {
-            _selectedDate = DateTime.parse(result['date']);
-          } catch (e) {
-            // If date parsing fails, keep the current date
-          }
-        }
-
-        // Populate total amount if available
-        if (result.containsKey('total_amount') &&
-            result['total_amount'] != null) {
-          _totalAmountController.text = result['total_amount'].toString();
-        }
-
-        // Add bill entries from items
-        for (var item in items) {
-          if (item.containsKey('description') && item.containsKey('amount')) {
-            // Determine if this is a tax, discount, or regular item
-            BillEntryType entryType = BillEntryType.item;
-
-            String desc = item['description'].toString().toLowerCase();
-            double itemAmount =
-                double.tryParse(item['amount'].toString()) ?? 0.0;
-
-            if (desc.contains('tax') ||
-                desc.contains('gst') ||
-                desc.contains('vat')) {
-              entryType = BillEntryType.tax;
-            } else if (desc.contains('discount') ||
-                desc.contains('coupon') ||
-                desc.contains('offer') ||
-                itemAmount < 0) {
-              entryType = BillEntryType.discount;
-              // Ensure discount amounts are positive for display purposes, but handled as negative in calculations
-              if (itemAmount < 0) {
-                itemAmount = itemAmount.abs();
-              }
-            }
-
-            final newEntry = BillEntry(
-              description: item['description'],
-              amount: itemAmount,
-              assignedTo: [], // Empty list initially
-              type: entryType,
+        // Add each item from the OCR result
+        for (final item in items) {
+          if (item is Map &&
+              item.containsKey('description') &&
+              item.containsKey('price')) {
+            _billEntries.add(
+              BillEntry(
+                description: item['description'].toString(),
+                amount: double.tryParse(item['price'].toString()) ?? 0.0,
+                assignedTo: [], // No assignments initially
+                type: BillEntryType.item,
+              ),
             );
-
-            setState(() {
-              _billEntries.add(newEntry);
-            });
           }
         }
 
-        // After processing all items, show a message about assignment
-        if (_billEntries.isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text(
-                    'Receipt processed! Please assign people to each item.'),
-                duration: Duration(seconds: 3),
-                behavior: SnackBarBehavior.floating),
-          );
+        // Set total amount if available
+        if (billResult.containsKey('total')) {
+          _totalAmountController.text = billResult['total'].toString();
         }
 
-        // Try to guess category based on merchant name or items
-        _guessCategory();
-      } else {
-        // Show error if no items were found
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Could not extract items from receipt'),
-              behavior: SnackBarBehavior.floating),
-        );
+        // Set description if available (often store name)
+        if (billResult.containsKey('merchant')) {
+          _descriptionController.text = billResult['merchant'].toString();
+          _guessCategory(); // Guess category from description
+        }
+
+        // Refresh UI
+        setState(() {});
       }
     } catch (e) {
-      // Hide loading indicator and show error
-      setState(() {
-        _isLoading = false;
-      });
-
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error processing receipt: $e')),
+        SnackBar(content: Text('Error processing image: $e')),
       );
     }
   }
@@ -812,16 +769,150 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     );
   }
 
-  void _saveExpense() {
+  void _saveExpense() async {
     if (_formKey.currentState!.validate()) {
-      // TODO: Save expense to database or state management
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Expense saved!'),
-            behavior: SnackBarBehavior.floating),
-      );
-      Navigator.pop(context);
+      try {
+        setState(() => _isLoading = true);
+
+        // Get the current user ID
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user == null) throw Exception('User not authenticated');
+
+        try {
+          await _ensureUserProfileExists(user.id);
+        } catch (e) {
+          throw Exception('Profile creation failed: $e');
+        }
+
+        // Convert the string category to an integer ID
+        int? categoryId = _getCategoryId(_selectedCategory);
+
+        // Create the expense with real data
+        final now = DateTime.now();
+        final newExpense = Expense(
+          id: 0, // Will be assigned by the database
+          description: _descriptionController.text,
+          totalAmount: double.parse(_totalAmountController.text),
+          currency: Provider.of<CurrencyProvider>(context, listen: false)
+              .currencyCode,
+          date: _selectedDate,
+          createdBy: user.id,
+          groupId: null, // Could be implemented for group expenses
+          categoryId: categoryId,
+          receiptImageUrl: null, // Will be updated if there's a receipt
+          splitType: 'equal', // Default split type
+          createdAt: now,
+          updatedAt: now,
+        );
+
+        // Save the expense using the provider
+        final expenseProvider =
+            Provider.of<ExpenseProvider>(context, listen: false);
+        final success = await expenseProvider.createExpense(newExpense);
+
+        // If we have a receipt image, link it to the expense
+        if (success && _currentReceiptId != null) {
+          await _receiptService.linkReceiptToExpense(
+              _currentReceiptId!, expenseProvider.lastInsertedId);
+        }
+
+        // Show success message and navigate back
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Expense saved successfully')),
+          );
+          Navigator.pop(context); // Return to previous screen
+        }
+      } catch (e) {
+        // Show error message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error saving expense: $e')),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+      }
     }
+  }
+
+  Future<void> _ensureUserProfileExists(String userId) async {
+    try {
+      LoggerService.info('Checking if profile exists for user ID: $userId');
+
+      // Check if profile exists
+      final response = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (response == null) {
+        LoggerService.info('Profile not found, creating new profile');
+
+        // Create a complete profile with all required fields
+        final profileData = {
+          'id': userId,
+          'username': userId.substring(0, 8),
+          'full_name': 'User',
+          'updated_at': DateTime.now().toIso8601String(),
+          'currency': 'INR',
+          'avatar_url':
+              null, // Explicitly include all columns that might be NOT NULL
+          'website': null,
+          'email': Supabase.instance.client.auth.currentUser?.email,
+        };
+
+        LoggerService.debug('Creating profile with data: $profileData');
+
+        // Use explicit insert with returning
+        final insertResponse =
+            await Supabase.instance.client.from('profiles').insert(profileData);
+
+        LoggerService.info('Profile created successfully');
+
+        // Add a small delay and verify profile creation
+        await Future.delayed(const Duration(milliseconds: 300));
+        final verifyProfile = await Supabase.instance.client
+            .from('profiles')
+            .select()
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (verifyProfile == null) {
+          LoggerService.error('Failed to verify profile creation');
+          throw Exception('Failed to create user profile: verification failed');
+        }
+
+        LoggerService.info('Profile creation verified successfully');
+      } else {
+        LoggerService.info('Profile already exists for user: $userId');
+      }
+    } catch (e) {
+      LoggerService.error('Error ensuring profile exists', e);
+      throw Exception('Failed to create user profile: $e');
+    }
+  }
+
+  // Helper method to convert category names to IDs
+  int? _getCategoryId(String? categoryName) {
+    if (categoryName == null) return null;
+
+    // Define your category mappings
+    final Map<String, int> categoryMap = {
+      'Food & Drinks': 1,
+      'Transportation': 2,
+      'Entertainment': 3,
+      'Shopping': 4,
+      'Utilities': 5,
+      'Rent': 6,
+      'Other': 7,
+    };
+
+    return categoryMap[categoryName] ??
+        7; // Default to 'Other' (7) if not found
   }
 
   void _showBatchAssignmentOptions() {
@@ -917,11 +1008,11 @@ class _AddBillEntryBottomSheet extends StatefulWidget {
 
 // Update the _AddBillEntryBottomSheetState class
 class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _amountController = TextEditingController();
-  List<String> _selectedFriends = [];
-  BillEntryType _selectedType = BillEntryType.item;
+  final formKey = GlobalKey<FormState>();
+  final TextEditingController descriptionController = TextEditingController();
+  final TextEditingController amountController = TextEditingController();
+  List<String> selectedFriends = [];
+  BillEntryType selectedType = BillEntryType.item;
 
   @override
   void initState() {
@@ -929,10 +1020,10 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
 
     // Pre-populate form if editing an existing entry
     if (widget.initialEntry != null) {
-      _descriptionController.text = widget.initialEntry!.description;
-      _amountController.text = widget.initialEntry!.amount.toString();
-      _selectedFriends = List.from(widget.initialEntry!.assignedTo);
-      _selectedType = widget.initialEntry!.type;
+      descriptionController.text = widget.initialEntry!.description;
+      amountController.text = widget.initialEntry!.amount.toString();
+      selectedFriends = List.from(widget.initialEntry!.assignedTo);
+      selectedType = widget.initialEntry!.type;
     }
   }
 
@@ -949,7 +1040,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
         top: 16.0,
       ),
       child: Form(
-        key: _formKey,
+        key: formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -960,7 +1051,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
             ),
             const SizedBox(height: 16),
             TextFormField(
-              controller: _descriptionController,
+              controller: descriptionController,
               decoration: const InputDecoration(
                 labelText: 'Item Description',
                 border: OutlineInputBorder(),
@@ -976,7 +1067,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
 
             // Entry type selector
             DropdownButtonFormField<BillEntryType>(
-              value: _selectedType,
+              value: selectedType,
               decoration: const InputDecoration(
                 labelText: 'Entry Type',
                 border: OutlineInputBorder(),
@@ -1003,7 +1094,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
               onChanged: (value) {
                 if (value != null) {
                   setState(() {
-                    _selectedType = value;
+                    selectedType = value;
                   });
                 }
               },
@@ -1011,7 +1102,7 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
             const SizedBox(height: 16),
 
             TextFormField(
-              controller: _amountController,
+              controller: amountController,
               decoration: InputDecoration(
                 labelText: 'Amount',
                 border: const OutlineInputBorder(),
@@ -1042,16 +1133,16 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
               spacing: 8.0,
               runSpacing: 8.0,
               children: widget.availableFriends.map((friend) {
-                final isSelected = _selectedFriends.contains(friend);
+                final isSelected = selectedFriends.contains(friend);
                 return FilterChip(
                   label: Text(friend),
                   selected: isSelected,
                   onSelected: (selected) {
                     setState(() {
                       if (selected) {
-                        _selectedFriends.add(friend);
+                        selectedFriends.add(friend);
                       } else {
-                        _selectedFriends.remove(friend);
+                        selectedFriends.remove(friend);
                       }
                     });
                   },
@@ -1064,8 +1155,8 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () {
-                  if (_formKey.currentState!.validate()) {
-                    if (_selectedFriends.isEmpty) {
+                  if (formKey.currentState!.validate()) {
+                    if (selectedFriends.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                             content: Text(
@@ -1076,10 +1167,10 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
                     }
 
                     final newEntry = BillEntry(
-                      description: _descriptionController.text,
-                      amount: double.parse(_amountController.text),
-                      assignedTo: List.from(_selectedFriends),
-                      type: _selectedType,
+                      description: descriptionController.text,
+                      amount: double.parse(amountController.text),
+                      assignedTo: List.from(selectedFriends),
+                      type: selectedType,
                     );
 
                     widget.onAdd(newEntry);
@@ -1104,11 +1195,9 @@ class _AddBillEntryBottomSheetState extends State<_AddBillEntryBottomSheet> {
   }
 }
 
-// Model class for bill entries
-// Add this enum above the BillEntry class
+// Add these at the bottom of the file, outside any class
 enum BillEntryType { item, tax, discount }
 
-// Update the BillEntry class to include a type property
 class BillEntry {
   final String description;
   final double amount;
