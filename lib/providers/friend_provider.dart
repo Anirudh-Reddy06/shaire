@@ -29,6 +29,27 @@ class FriendProvider with ChangeNotifier {
 
   String? get currentUserId => _supabase.auth.currentUser?.id;
 
+  Future<Map<String, double>> getFriendBalance(String friendId) async {
+  final expensesRes = await _supabase.rpc(
+    'get_shared_expenses',
+    params: {
+      'p_current_user_id': currentUserId,
+      'p_friend_id': friendId,
+    },
+  );
+  double youOwe = 0.0, youAreOwed = 0.0;
+  for (final e in expensesRes) {
+    final yourShare = e['your_share'] as num? ?? 0;
+    final youPaid = e['you_paid'] as num? ?? 0;
+    if (yourShare > youPaid) {
+      youOwe += yourShare - youPaid;
+    } else if (yourShare < youPaid) {
+      youAreOwed += youPaid - yourShare;
+    }
+  }
+  return {'youOwe': youOwe, 'youAreOwed': youAreOwed};
+}
+
   Future<void> fetchFriendsAndRequests() async {
     if (currentUserId == null) return;
 

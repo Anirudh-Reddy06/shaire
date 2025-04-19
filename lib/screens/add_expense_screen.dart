@@ -965,37 +965,60 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   }
 
   Future<void> _saveExpenseParticipants(int expenseId) async {
-    try {
-      // Get the total amount
-      final totalAmount = double.parse(_totalAmountController.text);
-      final count = _selectedFriendData.length;
-
-      if (count == 0) return;
-
-      // Calculate even split
-      final perPersonAmount = totalAmount / count;
-
-      // Create participant records
-      final participants = _selectedFriendData.map((friend) {
-        final isGroup = friend['isGroup'] == true;
-
-        return {
-          'expense_id': expenseId,
-          'user_id': isGroup ? null : friend['id'],
-          'group_id': isGroup ? friend['id'] : null,
-          'share_amount': perPersonAmount,
-          'paid_amount': 0, // Adjust this based on who paid
-          'status': 'pending',
-        };
-      }).toList();
-
-      // Insert into expense_participants table
-      await _supabase.from('expense_participants').insert(participants);
-    } catch (e) {
-      print('Error saving expense participants: $e');
-      rethrow;
+  try {
+    // Get the total amount and current user
+    final totalAmount = double.parse(_totalAmountController.text);
+    final currentUserId = _supabase.auth.currentUser?.id;
+    if (currentUserId == null) return;
+    
+    LoggerService.debug('Selected friend data: $_selectedFriendData');
+    
+    // Filter to get individual friends
+    final individualFriends = _selectedFriendData
+        .where((friend) => friend['isGroup'] != true)
+        .toList();
+        
+    LoggerService.debug('Individual friends after filtering: $individualFriends');
+    
+    final count = individualFriends.length + 1; // +1 for the current user
+    if (count <= 1) {
+      LoggerService.warning('No friends to split with - skipping participants');
+      return;
     }
+
+    // Calculate even split
+    final perPersonAmount = totalAmount / count;
+    
+    // IMPORTANT: Create participant records for BOTH friends AND current user
+    final participants = [
+      // Add current user as participant (who paid the full amount)
+      {
+        'expense_id': expenseId,
+        'user_id': currentUserId,
+        'share_amount': perPersonAmount,
+        'paid_amount': totalAmount, // They paid everything initially
+        'settled': false,
+      },
+      // Add all friends
+      ...individualFriends.map((friend) => {
+        'expense_id': expenseId,
+        'user_id': friend['id'],
+        'share_amount': perPersonAmount,
+        'paid_amount': 0, // They haven't paid anything yet
+        'settled': false,
+      })
+    ];
+    
+    LoggerService.debug('Participants to be added: $participants');
+    
+    // Insert all participants
+    await _supabase.from('expense_participants').insert(participants);
+    LoggerService.info('Successfully added ${participants.length} participants to expense $expenseId');
+  } catch (e) {
+    LoggerService.error('Error in _saveExpenseParticipants', e);
+    rethrow;
   }
+}
 
   Future<void> _ensureUserProfileExists(String userId) async {
     try {

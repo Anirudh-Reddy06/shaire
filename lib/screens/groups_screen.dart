@@ -293,8 +293,6 @@ class _GroupsScreenState extends State<GroupsScreen>
                           ),
                         );
                       } else if (itemType == 'friend') {
-                        final double youGet = 0.0;
-                        final double youOwe = 0.0;
                         return Card(
                           margin: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 4),
@@ -308,9 +306,23 @@ class _GroupsScreenState extends State<GroupsScreen>
                             title: Text(item['full_name'] ??
                                 item['username'] ??
                                 'Unknown'),
-                            subtitle: Text(
-                              'You get ${currencyProvider.format(youGet)}, You owe ${currencyProvider.format(youOwe)}',
+                            subtitle: FutureBuilder<Map<String, double>>(
+                              future: friendProvider.getFriendBalance(item['id']),
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                  return const Text('Loading balances...');
+                                }
+                                if (snapshot.hasError) {
+                                  return const Text('Could not load balances');
+                                }
+                                final youGet = snapshot.data?['youAreOwed'] ?? 0.0;
+                                final youOwe = snapshot.data?['youOwe'] ?? 0.0;
+                                return Text(
+                                  'You get ${currencyProvider.format(youGet)}, You owe ${currencyProvider.format(youOwe)}',
+                                );
+                              },
                             ),
+
                             onTap: () {
                               Navigator.push(
                                 context,
