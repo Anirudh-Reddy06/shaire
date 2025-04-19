@@ -12,11 +12,20 @@ import '../providers/currency_provider.dart';
 import '../database/receipt.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:uuid/uuid.dart';
 
 class AddExpenseScreen extends StatefulWidget {
-  const AddExpenseScreen({super.key});
+  final int? groupId;
+  final String? groupName;
+  final dynamic friendId;
+  final String? friendName;
+
+  const AddExpenseScreen({
+    super.key,
+    this.groupId,
+    this.groupName,
+    this.friendId,
+    this.friendName,
+  });
 
   @override
   State<AddExpenseScreen> createState() => _AddExpenseScreenState();
@@ -26,15 +35,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   // Form key for validation
   final _formKey = GlobalKey<FormState>();
 
-  // Selected friends/group
-  final List<String> _availableFriends = [
-    'Alex',
-    'Bailey',
-    'Charlie',
-    'Dana',
-    'Evan'
-  ];
+  var _availableFriends = <Map<String, dynamic>>[];
+  final List<Map<String, dynamic>> _selectedFriendData = [];
   final List<String> _selectedFriends = [];
+  var _recentContactsAndGroups = <Map<String, dynamic>>[];
+  final _supabase = Supabase.instance.client;
 
   // Form fields
   final TextEditingController _descriptionController = TextEditingController();
@@ -67,15 +72,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final TextEditingController _friendSearchController = TextEditingController();
   String _friendSearchQuery = '';
 
-  // Add this list for recent groups/friends
-  final List<Map<String, dynamic>> _recentContactsAndGroups = [
-    {'name': 'Roommates', 'isGroup': true},
-    {'name': 'Alex', 'isGroup': false},
-    {'name': 'Lunch Group', 'isGroup': true},
-    {'name': 'Bailey', 'isGroup': false},
-    {'name': 'Weekend Trip', 'isGroup': true},
-  ];
-
   // Add this property to your class
   final ReceiptService _receiptService = ReceiptService();
   int? _currentReceiptId;
@@ -84,6 +80,105 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   void initState() {
     super.initState();
     _friendSearchController.addListener(_updateFriendSearchQuery);
+
+    _loadFriendsAndGroups();
+
+    // Pre-fill group info if provided
+    if (widget.groupName != null) {
+      // Add the group to selected contacts
+      _selectedFriends.add(widget.groupName!);
+
+      // If you have a list of recent groups, you could update it
+      final existingGroupIndex = _recentContactsAndGroups
+          .indexWhere((g) => g['name'] == widget.groupName && g['isGroup']);
+
+      if (existingGroupIndex < 0) {
+        // Add to recent contacts if not already there
+        _recentContactsAndGroups
+            .insert(0, {'name': widget.groupName!, 'isGroup': true});
+      }
+    }
+
+    // Pre-fill friend info if provided
+    if (widget.friendName != null) {
+      // Add the friend to selected contacts
+      _selectedFriends.add(widget.friendName!);
+
+      // Add to recent contacts if not already there
+      final existingFriendIndex = _recentContactsAndGroups
+          .indexWhere((g) => g['name'] == widget.friendName && !g['isGroup']);
+
+      if (existingFriendIndex < 0) {
+        _recentContactsAndGroups
+            .insert(0, {'name': widget.friendName!, 'isGroup': false});
+      }
+    }
+  }
+
+  Future<void> _loadFriendsAndGroups() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      // Load friends
+      final friendsData = await _supabase
+          .rpc('get_user_friends', params: {'p_user_id': userId});
+
+      // Debug
+      print('Friends data returned: ${friendsData.length} items');
+      if (friendsData.isNotEmpty) {
+        print('First friend example: ${friendsData.first}');
+      }
+
+      // Load groups
+      final groupsData = await _supabase
+          .from('group_members')
+          .select('group_id, groups:group_id(id, name)')
+          .eq('user_id', userId);
+
+      print('Groups data returned: ${groupsData.length} items');
+
+      // Format the data
+      List<Map<String, dynamic>> friends = [];
+      for (final f in friendsData) {
+        friends.add({
+          'id': f['user_id'],
+          'name': f['full_name'] ?? f['username'] ?? 'Unknown',
+          'username': f['username'],
+          'avatar_url': f['avatar_url'],
+          'isGroup': false,
+        });
+      }
+
+      List<Map<String, dynamic>> groups = [];
+      for (final g in groupsData) {
+        final group = g['groups'] as Map<String, dynamic>;
+        groups.add({
+          'id': group['id'],
+          'name': group['name'],
+          'isGroup': true,
+        });
+      }
+
+      // Combine friends and groups into available contacts
+      final allContacts = [...friends, ...groups];
+      final recentContacts = allContacts.take(5).toList();
+
+      setState(() {
+        _availableFriends = allContacts; // Changed: Use combined list here
+        _recentContactsAndGroups = recentContacts;
+      });
+
+      print('Total available contacts loaded: ${_availableFriends.length}');
+    } catch (e) {
+      print('Error loading friends and groups: $e');
+      // Add user feedback
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load contacts: $e')),
+        );
+      }
+    }
   }
 
   void _updateFriendSearchQuery() {
@@ -315,7 +410,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     );
   }
 
-  // Replace the current _buildFriendsSelection method with this enhanced version:
   Widget _buildFriendsSelection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,90 +439,111 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
             style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 56,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _recentContactsAndGroups.length,
-              itemBuilder: (context, index) {
-                final contact = _recentContactsAndGroups[index];
-                final isSelected = _selectedFriends.contains(contact['name']);
+          _recentContactsAndGroups.isEmpty
+              ? const Text('No recent contacts')
+              : SizedBox(
+                  height: 56,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _recentContactsAndGroups.length,
+                    itemBuilder: (context, index) {
+                      final contact = _recentContactsAndGroups[index];
+                      final isSelected =
+                          _selectedFriends.contains(contact['name']);
 
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        if (isSelected) {
-                          _selectedFriends.remove(contact['name']);
-                        } else {
-                          _selectedFriends.add(contact['name']);
-                        }
-                      });
-                    },
-                    child: Chip(
-                      avatar: CircleAvatar(
-                        backgroundColor: isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                        child: Icon(
-                          contact['isGroup'] ? Icons.group : Icons.person,
-                          size: 16,
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.onPrimary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              if (isSelected) {
+                                _selectedFriends.remove(contact['name']);
+                                _selectedFriendData.removeWhere((f) =>
+                                    f['id'] == contact['id'] &&
+                                    f['isGroup'] == contact['isGroup']);
+                              } else {
+                                _selectedFriends.add(contact['name']);
+                                _selectedFriendData.add({
+                                  'id': contact['id'],
+                                  'name': contact['name'],
+                                  'isGroup': contact['isGroup'],
+                                });
+                              }
+                            });
+                          },
+                          child: Chip(
+                            avatar: CircleAvatar(
+                              backgroundColor: isSelected
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
+                              child: Icon(
+                                contact['isGroup'] ? Icons.group : Icons.person,
+                                size: 16,
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.onPrimary
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                              ),
+                            ),
+                            label: Text(contact['name']),
+                            backgroundColor: isSelected
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : Theme.of(context).colorScheme.surface,
+                            side: BorderSide(
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .outline
+                                      .withOpacity(0.5),
+                            ),
+                          ),
                         ),
-                      ),
-                      label: Text(contact['name']),
-                      backgroundColor: isSelected
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context).colorScheme.surface,
-                      side: BorderSide(
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context)
-                                .colorScheme
-                                .outline
-                                .withOpacity(0.5),
-                      ),
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
-          ),
+                ),
         ],
 
         const SizedBox(height: 16),
         Text(
-          'All Friends',
+          'Friends & Groups',
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const SizedBox(height: 8),
 
-        // Filtered friends list
+        // Filtered friends and groups
         Wrap(
           spacing: 8.0,
           runSpacing: 8.0,
           children: _availableFriends
               .where((friend) =>
                   _friendSearchQuery.isEmpty ||
-                  friend
+                  friend['name']
                       .toLowerCase()
                       .contains(_friendSearchQuery.toLowerCase()))
               .map((friend) {
-            final isSelected = _selectedFriends.contains(friend);
+            final isSelected = _selectedFriends.contains(friend['name']);
             return FilterChip(
-              label: Text(friend),
+              label: Text(friend['name']),
               selected: isSelected,
               onSelected: (selected) {
                 setState(() {
                   if (selected) {
-                    _selectedFriends.add(friend);
+                    _selectedFriends.add(friend['name']);
+                    _selectedFriendData.add({
+                      'id': friend['id'],
+                      'name': friend['name'],
+                      'isGroup': friend['isGroup'],
+                    });
                   } else {
-                    _selectedFriends.remove(friend);
+                    _selectedFriends.remove(friend['name']);
+                    _selectedFriendData.removeWhere((f) =>
+                        f['id'] == friend['id'] &&
+                        f['isGroup'] == friend['isGroup']);
                   }
                 });
               },
@@ -733,8 +848,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       context: context,
       isScrollControlled: true,
       builder: (context) => _AddBillEntryBottomSheet(
-        availableFriends:
-            _selectedFriends.isEmpty ? _availableFriends : _selectedFriends,
+        availableFriends: _selectedFriends.isEmpty
+            ? _availableFriends
+                .map((friend) => friend['name'] as String)
+                .toList()
+            : _selectedFriends,
         onAdd: (entry) {
           setState(() {
             _billEntries.add(entry);
@@ -757,7 +875,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       context: context,
       isScrollControlled: true,
       builder: (context) => _AddBillEntryBottomSheet(
-        availableFriends: _availableFriends,
+        availableFriends: _availableFriends
+            .map((friend) => friend['name'] as String)
+            .toList(),
         onAdd: (updatedEntry) {
           setState(() {
             _billEntries[index] = updatedEntry;
@@ -790,17 +910,17 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         // Create the expense with real data
         final now = DateTime.now();
         final newExpense = Expense(
-          id: 0, // Will be assigned by the database
+          id: 0,
           description: _descriptionController.text,
           totalAmount: double.parse(_totalAmountController.text),
           currency: Provider.of<CurrencyProvider>(context, listen: false)
               .currencyCode,
           date: _selectedDate,
           createdBy: user.id,
-          groupId: null, // Could be implemented for group expenses
+          groupId: widget.groupId, // Keep this for group expenses
           categoryId: categoryId,
-          receiptImageUrl: null, // Will be updated if there's a receipt
-          splitType: 'equal', // Default split type
+          receiptImageUrl: null,
+          splitType: 'equal',
           createdAt: now,
           updatedAt: now,
         );
@@ -810,10 +930,17 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
             Provider.of<ExpenseProvider>(context, listen: false);
         final success = await expenseProvider.createExpense(newExpense);
 
-        // If we have a receipt image, link it to the expense
-        if (success && _currentReceiptId != null) {
-          await _receiptService.linkReceiptToExpense(
-              _currentReceiptId!, expenseProvider.lastInsertedId);
+        if (success) {
+          final expenseId = expenseProvider.lastInsertedId;
+
+          // Handle participant relationships
+          await _saveExpenseParticipants(expenseId);
+
+          // If we have a receipt image, link it to the expense
+          if (_currentReceiptId != null) {
+            await _receiptService.linkReceiptToExpense(
+                _currentReceiptId!, expenseId);
+          }
         }
 
         // Show success message and navigate back
@@ -835,6 +962,39 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           setState(() => _isLoading = false);
         }
       }
+    }
+  }
+
+  Future<void> _saveExpenseParticipants(int expenseId) async {
+    try {
+      // Get the total amount
+      final totalAmount = double.parse(_totalAmountController.text);
+      final count = _selectedFriendData.length;
+
+      if (count == 0) return;
+
+      // Calculate even split
+      final perPersonAmount = totalAmount / count;
+
+      // Create participant records
+      final participants = _selectedFriendData.map((friend) {
+        final isGroup = friend['isGroup'] == true;
+
+        return {
+          'expense_id': expenseId,
+          'user_id': isGroup ? null : friend['id'],
+          'group_id': isGroup ? friend['id'] : null,
+          'share_amount': perPersonAmount,
+          'paid_amount': 0, // Adjust this based on who paid
+          'status': 'pending',
+        };
+      }).toList();
+
+      // Insert into expense_participants table
+      await _supabase.from('expense_participants').insert(participants);
+    } catch (e) {
+      print('Error saving expense participants: $e');
+      rethrow;
     }
   }
 

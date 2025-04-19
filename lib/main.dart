@@ -17,6 +17,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'screens/auth_screen.dart';
 import 'screens/complete_profile_screen.dart';
+import 'providers/friend_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,8 +36,8 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (context) => ExpenseProvider()),
         ChangeNotifierProvider(create: (context) => AnalyticsProvider()),
         ChangeNotifierProvider(create: (context) => UserProvider()),
-        ChangeNotifierProvider(
-            create: (context) => PredictionProvider()), // Add this line
+        ChangeNotifierProvider(create: (context) => PredictionProvider()),
+        ChangeNotifierProvider(create: (context) => FriendProvider()),
       ],
       child: const MyApp(),
     ),

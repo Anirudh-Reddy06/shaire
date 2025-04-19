@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shaire/theme/theme.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Keep for sign out
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/currency_provider.dart';
 import '../providers/user_provider.dart';
+import 'edit_profile_screen.dart';
+import 'edit_payment_info_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -176,8 +178,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.edit, size: 18),
                 label: const Text('Edit Profile'),
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Edit profile coming soon')),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const EditProfileScreen()),
                   );
                 },
               ),
@@ -222,9 +226,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: const Icon(Icons.edit, size: 18),
                 label: const Text('Edit Payment Info'),
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Edit payment info coming soon')),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const EditPaymentInfoScreen()),
                   );
                 },
               ),
@@ -335,7 +340,6 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.exit_to_app),
             title: const Text('Sign Out'),
             onTap: () {
-              // TODO: Implement sign out logic
               showDialog(
                 context: context,
                 builder: (BuildContext context) {

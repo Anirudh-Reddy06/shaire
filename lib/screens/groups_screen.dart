@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart'; // Add this import
-import '../providers/currency_provider.dart'; // Add this import
+import 'package:provider/provider.dart';
+import '../providers/currency_provider.dart';
+import '../providers/friend_provider.dart'; // <-- Import
+import '../providers/group_provider.dart'; // <-- Import
+// Import detail screens if they exist, otherwise keep placeholders
+import '../widgets/friend_selection_widget.dart';
+import 'friend_details_screen.dart';
+import 'group_details_screen.dart';
 
 class GroupsScreen extends StatefulWidget {
   const GroupsScreen({super.key});
@@ -15,13 +21,26 @@ class _GroupsScreenState extends State<GroupsScreen>
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // Controllers for dialogs
+  final TextEditingController _addFriendController = TextEditingController();
+  final TextEditingController _joinGroupController = TextEditingController();
+  final TextEditingController _createGroupController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.index = 0; // Start with Friends tab
+    _tabController.index = 0;
     _searchController.addListener(_updateSearchQuery);
     _tabController.addListener(_tabChanged);
+
+    // Fetch initial data using the providers
+    // Use WidgetsBinding to ensure context is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<FriendProvider>(context, listen: false)
+          .fetchFriendsAndRequests();
+      Provider.of<GroupProvider>(context, listen: false).fetchGroups();
+    });
   }
 
   void _updateSearchQuery() {
@@ -32,9 +51,7 @@ class _GroupsScreenState extends State<GroupsScreen>
 
   void _tabChanged() {
     // Only update if the tab is actually changing
-    if (_tabController.indexIsChanging) {
-      setState(() {});
-    }
+    setState(() {});
   }
 
   @override
@@ -43,85 +60,100 @@ class _GroupsScreenState extends State<GroupsScreen>
     _tabController.dispose();
     _searchController.removeListener(_updateSearchQuery);
     _searchController.dispose();
+    _addFriendController.dispose();
+    _joinGroupController.dispose();
+    _createGroupController.dispose();
+    _joinGroupController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Get providers for easy access in build methods if needed (though Consumer is often better)
+    // final friendProvider = Provider.of<FriendProvider>(context);
+    // final groupProvider = Provider.of<GroupProvider>(context);
+
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+    final Color surfaceColor = Theme.of(context).colorScheme.surface;
+
+    //final Color secondaryColor = Theme.of(context).colorScheme.secondary;
+
     return Scaffold(
-      // Create our own AppBar here instead of using the one from MainScreen
-      // This will allow us to have different styling for this screen
       appBar: AppBar(
-        backgroundColor:
-            Theme.of(context).colorScheme.primary, // Colored AppBar
-        foregroundColor: Colors.white, // White text and icons
-        automaticallyImplyLeading: false, // No back button
-        title: const Text('Groups', style: TextStyle(color: Colors.white)),
+        automaticallyImplyLeading: false,
+        backgroundColor: primaryColor,
+        iconTheme: IconThemeData(color: onPrimaryColor),
+        title: Text(
+          'Friends & Groups',
+          style: TextStyle(color: onPrimaryColor),
+        ),
         centerTitle: true,
-        elevation: 0, // No shadow
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Friends'),
-            Tab(text: 'Groups'),
-          ],
-          labelColor: Colors.white, // Active tab text color
-          unselectedLabelColor: Colors.white70, // Inactive tab text color
-          indicatorColor: Colors.white, // White indicator line
-          indicatorWeight: 3,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(kTextTabBarHeight),
+          child: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'FRIENDS'),
+              Tab(text: 'GROUPS'),
+            ],
+            indicatorColor: onPrimaryColor,
+            dividerColor: onPrimaryColor,
+            labelColor: onPrimaryColor,
+            unselectedLabelColor: onPrimaryColor.withAlpha((0.7 * 255).round()),
+          ),
         ),
       ),
       body: Column(
         children: [
-          // Search bar
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: _tabController.index == 0
-                    ? 'Search friends...'
-                    : 'Search groups...',
-                prefixIcon: Icon(Icons.search,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.white70
-                        : Colors.black54),
+                hintText:
+                    'Search ${_tabController.index == 0 ? "Friends" : "Groups"}...',
+                prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(30.0),
                   borderSide: BorderSide.none,
                 ),
                 filled: true,
-                // Use theme-aware colors instead of hardcoded grey
-                fillColor: Theme.of(context).brightness == Brightness.dark
-                    ? Theme.of(context).cardColor.withOpacity(0.5)
-                    : Colors.grey.shade200,
-                hintStyle: TextStyle(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.white60
-                      : Colors.black38,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                // --- FIX: Replace withOpacity with withAlpha ---
+                fillColor: surfaceColor.withAlpha((0.5 * 255).round()),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
               ),
-              style: TextStyle(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.white
-                    : Colors.black,
-              ),
-              onChanged: (value) {
-                setState(() {
-                  _searchQuery = value;
-                });
-              },
             ),
           ),
-
-          // Tab content
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildFriendsTab(),
-                _buildGroupsTab(),
+                Consumer<FriendProvider>(
+                    builder: (context, friendProvider, child) {
+                  if (friendProvider.isLoading &&
+                      friendProvider.friends.isEmpty &&
+                      friendProvider.pendingReceived.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (friendProvider.error != null) {
+                    return Center(
+                        child: Text("Error: ${friendProvider.error}"));
+                  }
+                  return _buildFriendsTabContent(friendProvider);
+                }),
+                Consumer<GroupProvider>(
+                    builder: (context, groupProvider, child) {
+                  if (groupProvider.isLoading && groupProvider.groups.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (groupProvider.error != null) {
+                    return Center(child: Text("Error: ${groupProvider.error}"));
+                  }
+                  return _buildGroupsTabContent(groupProvider);
+                }),
               ],
             ),
           ),
@@ -130,77 +162,180 @@ class _GroupsScreenState extends State<GroupsScreen>
     );
   }
 
-  Widget _buildFriendsTab() {
-    // Get currency provider
+  // --- Modified Friends Tab ---
+  Widget _buildFriendsTabContent(FriendProvider friendProvider) {
     final currencyProvider = Provider.of<CurrencyProvider>(context);
+    final Color secondaryColor = Theme.of(context).colorScheme.secondary;
+    final Color primaryColor = Theme.of(context).colorScheme.primary;
+    final Color onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
 
-    // Sample friend data
-    final List<Map<String, dynamic>> friends = [
-      {'name': 'Alex Johnson', 'get': 10.0, 'owe': 5.0},
-      {'name': 'Bailey Smith', 'get': 25.0, 'owe': 0.0},
-      {'name': 'Charlie Brown', 'get': 0.0, 'owe': 15.0},
-      {'name': 'Dana White', 'get': 7.5, 'owe': 7.5},
-      {'name': 'Evan Peters', 'get': 12.0, 'owe': 3.0},
-    ];
-
-    // Filter friends by search query
-    final filteredFriends = friends
-        .where((friend) => friend['name']
-            .toString()
+    final List<Map<String, dynamic>> pendingRequests =
+        friendProvider.pendingReceived;
+    final List<Map<String, dynamic>> filteredFriends = friendProvider.friends
+        .where((friend) => (friend['username'] ?? friend['full_name'] ?? '')
             .toLowerCase()
             .contains(_searchQuery.toLowerCase()))
         .toList();
 
+    final List<Map<String, dynamic>> displayItems = [
+      ...pendingRequests.map((req) => {...req, '_type': 'pending'}),
+      ...filteredFriends.map((friend) => {...friend, '_type': 'friend'}),
+    ];
+
+    final itemCount = displayItems.length;
+
     return Stack(
       children: [
-        // Friend list
-        filteredFriends.isEmpty
-            ? const Center(child: Text('No friends found'))
-            : ListView.builder(
-                padding: const EdgeInsets.only(bottom: 80), // Space for FAB
-                itemCount: filteredFriends.length,
-                itemBuilder: (context, index) {
-                  final friend = filteredFriends[index];
-                  return Card(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withOpacity(0.8),
-                        child: const Icon(Icons.person, color: Colors.white),
-                      ),
-                      title: Text(friend['name']),
-                      subtitle: Text(
-                        'You get ${currencyProvider.format(friend['get'])}, You owe ${currencyProvider.format(friend['owe'])}',
-                      ),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const FriendDetailsScreen()),
-                        );
-                      },
-                    ),
-                  );
-                },
-              ),
+        itemCount == 0 && _searchQuery.isEmpty && !friendProvider.isLoading
+            ? const Center(
+                child: Text(
+                    'No friends or requests yet.\nUse the + button to add friends.'))
+            : itemCount == 0 && _searchQuery.isNotEmpty
+                ? const Center(
+                    child: Text('No friends found matching your search.'))
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 80),
+                    itemCount: itemCount,
+                    itemBuilder: (context, index) {
+                      final item = displayItems[index];
+                      final itemType = item['_type'];
 
-        // FAB positioned at bottom right
+                      if (itemType == 'pending') {
+                        final sender = item['sender_profile'] ?? {};
+                        final friendshipId = item['friendship_id'] as int;
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor:
+                                  Theme.of(context).colorScheme.secondary,
+                              child: const Icon(Icons.person_add,
+                                  color: Colors.white),
+                            ),
+                            title: Text(sender['full_name'] ??
+                                sender['username'] ??
+                                ''),
+                            subtitle: const Text('Wants to be your friend'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Accept
+                                IconButton(
+                                  icon: const Icon(Icons.check,
+                                      color: Colors.green),
+                                  //tooltip: 'Accept',
+                                  onPressed: () async {
+                                    // Store reference to the context at the current scope
+                                    final currentContext = context;
+
+                                    try {
+                                      await friendProvider
+                                          .respondToFriendRequest(
+                                              friendshipId, true);
+
+                                      if (!mounted) return;
+
+                                      // Use the stored context reference
+                                      ScaffoldMessenger.of(currentContext)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                            content: Text(
+                                                'Friend request accepted!')),
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+
+                                      // Use the stored context reference
+                                      ScaffoldMessenger.of(currentContext)
+                                          .showSnackBar(
+                                        SnackBar(content: Text('Error: $e')),
+                                      );
+                                    }
+                                  },
+                                ),
+
+// Reject
+                                IconButton(
+                                  icon: const Icon(Icons.close,
+                                      color: Colors.red),
+                                  //tooltip: 'Reject',
+                                  onPressed: () async {
+                                    //final messenger = ScaffoldMessenger.of(context);
+                                    try {
+                                      await friendProvider
+                                          .respondToFriendRequest(
+                                              friendshipId, false);
+                                      if (!mounted) return;
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                              content: Text(
+                                                  'Friend request rejected!')),
+                                        );
+                                      });
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(content: Text('Error: $e')),
+                                        );
+                                      });
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      } else if (itemType == 'friend') {
+                        final double youGet = 0.0;
+                        final double youOwe = 0.0;
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor:
+                                  primaryColor.withAlpha((0.8 * 255).round()),
+                              child: Icon(Icons.person, color: onPrimaryColor),
+                              // backgroundImage: item['avatar_url'] != null ? NetworkImage(item['avatar_url']) : null,
+                            ),
+                            title: Text(item['full_name'] ??
+                                item['username'] ??
+                                'Unknown'),
+                            subtitle: Text(
+                              'You get ${currencyProvider.format(youGet)}, You owe ${currencyProvider.format(youOwe)}',
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (context) => FriendDetailsScreen(
+                                        friendId: item['id'])),
+                              );
+                            },
+                          ),
+                        );
+                      } else {
+                        return const SizedBox.shrink();
+                      }
+                    },
+                  ),
         Positioned(
           right: 16,
           bottom: 16,
           child: FloatingActionButton(
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            foregroundColor: Colors.white,
+            heroTag: 'addFriendFab',
+            backgroundColor: primaryColor,
+            foregroundColor: onPrimaryColor,
             onPressed: () {
-              _showAddFriendDialog();
+              _showAddFriendDialog(friendProvider);
             },
-            tooltip: 'Add Friend',
-            elevation: 4,
             child: const Icon(Icons.person_add),
           ),
         ),
@@ -208,87 +343,82 @@ class _GroupsScreenState extends State<GroupsScreen>
     );
   }
 
-  Widget _buildGroupsTab() {
-    // Sample group data
-    final List<Map<String, dynamic>> groups = [
-      {'name': 'Roommates', 'members': 3},
-      {'name': 'Family Trip', 'members': 5},
-      {'name': 'Office Lunch', 'members': 8},
-      {'name': 'Weekend Getaway', 'members': 4},
-      {'name': 'Book Club', 'members': 6},
-    ];
+  // --- Modified Groups Tab ---
+  Widget _buildGroupsTabContent(GroupProvider groupProvider) {
+    final Color primaryColor = Theme.of(context).colorScheme.primary;
+    final Color onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+    final Color secondaryColor = Theme.of(context).colorScheme.secondary;
+    final Color onSecondaryColor = Theme.of(context).colorScheme.onSecondary;
 
-    // Filter groups by search query
-    final filteredGroups = groups
-        .where((group) => group['name']
-            .toString()
+    final List<Map<String, dynamic>> filteredGroups = groupProvider.groups
+        .where((group) => (group['name'] ?? '')
             .toLowerCase()
             .contains(_searchQuery.toLowerCase()))
         .toList();
+    final itemCount = filteredGroups.length;
 
     return Stack(
       children: [
-        // Group list
-        filteredGroups.isEmpty
-            ? const Center(child: Text('No groups found'))
-            : ListView.builder(
-                padding: const EdgeInsets.only(bottom: 80), // Space for FABs
-                itemCount: filteredGroups.length,
-                itemBuilder: (context, index) {
-                  final group = filteredGroups[index];
-                  return Card(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withOpacity(0.8),
-                        child: const Icon(Icons.group, color: Colors.white),
-                      ),
-                      title: Text(group['name']),
-                      subtitle: Text('Members: ${group['members']}'),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => const GroupDetailsScreen()),
-                        );
-                      },
-                    ),
-                  );
-                },
-              ),
-
-        // FABs positioned at bottom
+        itemCount == 0 && _searchQuery.isEmpty && !groupProvider.isLoading
+            ? const Center(
+                child: Text(
+                    'No groups found.\nUse the buttons to create or join.'))
+            : itemCount == 0 && _searchQuery.isNotEmpty
+                ? const Center(
+                    child: Text('No groups found matching your search.'))
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 150),
+                    itemCount: itemCount,
+                    itemBuilder: (context, index) {
+                      final group = filteredGroups[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            // --- FIX: Replace withOpacity with withAlpha ---
+                            backgroundColor:
+                                primaryColor.withAlpha((0.8 * 255).round()),
+                            child: Icon(Icons.group, color: onPrimaryColor),
+                          ),
+                          title: Text(group['name'] ?? 'Unnamed Group'),
+                          subtitle:
+                              Text('Members: ${group['member_count'] ?? 0}'),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => GroupDetailsScreen(
+                                  groupId: group['id'] as int,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
         Positioned(
           right: 16,
           bottom: 16,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Join group button
-              FloatingActionButton.small(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.white,
-                onPressed: () {
-                  _showJoinGroupDialog();
-                },
+              FloatingActionButton(
+                heroTag: 'joinGroupFab',
                 tooltip: 'Join Group',
-                elevation: 4,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                onPressed: () => _showJoinGroupDialog(groupProvider),
                 child: const Icon(Icons.group_add),
               ),
               const SizedBox(height: 16),
-              // Create group button
               FloatingActionButton(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
-                onPressed: () {
-                  _showCreateGroupDialog();
-                },
+                heroTag: 'createGroupFab',
                 tooltip: 'Create Group',
-                elevation: 4,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                onPressed: () => _showCreateGroupDialog(groupProvider),
                 child: const Icon(Icons.create),
               ),
             ],
@@ -298,30 +428,40 @@ class _GroupsScreenState extends State<GroupsScreen>
     );
   }
 
-  // Dialog methods
-  void _showAddFriendDialog() {
+  void _showAddFriendDialog(FriendProvider friendProvider) {
+    _addFriendController.clear();
+    final outer = context; // <— capture screen context
     showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: outer,
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Add Friend'),
-        content: const TextField(
-          decoration: InputDecoration(
+        content: TextField(
+          controller: _addFriendController,
+          decoration: const InputDecoration(
             labelText: 'Friend\'s Email or Username',
-            hintText: 'Enter email or username',
           ),
           autofocus: true,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL'),
-          ),
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('CANCEL')),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Friend request sent')),
-              );
+            onPressed: () async {
+              final input = _addFriendController.text;
+              Navigator.pop(dialogCtx); // <— pop the dialog only
+              try {
+                await friendProvider.sendFriendRequest(input);
+                if (!mounted) return;
+                ScaffoldMessenger.of(outer).showSnackBar(
+                  const SnackBar(content: Text('Friend request sent!')),
+                );
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(outer).showSnackBar(
+                  SnackBar(content: Text('Error: ${e.toString()}')),
+                );
+              }
             },
             child: const Text('SEND REQUEST'),
           ),
@@ -330,29 +470,46 @@ class _GroupsScreenState extends State<GroupsScreen>
     );
   }
 
-  void _showJoinGroupDialog() {
+  void _showJoinGroupDialog(GroupProvider groupProvider) {
+    final outerCtx = context;
+    _joinGroupController.clear();
+
     showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: outerCtx,
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Join Group'),
-        content: const TextField(
-          decoration: InputDecoration(
-            labelText: 'Group Code',
-            hintText: 'Enter group invite code',
-          ),
+        content: TextField(
+          controller: _joinGroupController,
+          decoration: const InputDecoration(labelText: 'Invite Code'),
           autofocus: true,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogCtx),
             child: const Text('CANCEL'),
           ),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Joining group...')),
-              );
+            onPressed: () async {
+              final code = _joinGroupController.text.trim();
+              if (code.isEmpty) {
+                ScaffoldMessenger.of(outerCtx).showSnackBar(
+                  const SnackBar(content: Text('Please enter an invite code')),
+                );
+                return;
+              }
+              Navigator.pop(dialogCtx);
+              try {
+                await groupProvider.joinGroup(code);
+                if (!mounted) return;
+                ScaffoldMessenger.of(outerCtx).showSnackBar(
+                  const SnackBar(content: Text('Joined group successfully!')),
+                );
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(outerCtx).showSnackBar(
+                  SnackBar(content: Text('Error joining group: $e')),
+                );
+              }
             },
             child: const Text('JOIN'),
           ),
@@ -361,29 +518,80 @@ class _GroupsScreenState extends State<GroupsScreen>
     );
   }
 
-  void _showCreateGroupDialog() {
+  void _showCreateGroupDialog(GroupProvider groupProvider) {
+    _createGroupController.clear();
+    List<String> selectedFriends = [];
+    final outer = context;
+
     showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: outer,
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Create Group'),
-        content: const TextField(
-          decoration: InputDecoration(
-            labelText: 'Group Name',
-            hintText: 'Enter a name for your group',
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _createGroupController,
+                decoration: const InputDecoration(labelText: 'Group Name'),
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              const Text('Add friends to group:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: FriendSelectionWidget(
+                  onSelectionChanged: (selectedIds) {
+                    selectedFriends = selectedIds;
+                  },
+                ),
+              ),
+            ],
           ),
-          autofocus: true,
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogCtx),
             child: const Text('CANCEL'),
           ),
+          // In your _showCreateGroupDialog method:
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Group created')),
-              );
+            onPressed: () async {
+              final name = _createGroupController.text;
+              if (name.trim().isEmpty) {
+                ScaffoldMessenger.of(outer).showSnackBar(
+                  const SnackBar(content: Text('Please enter a group name')),
+                );
+                return;
+              }
+
+              Navigator.pop(dialogCtx);
+              try {
+                // Create group first
+                final groupId = await groupProvider.createGroup(name, null);
+
+                // Add selected friends to the group (this was the issue)
+                if (selectedFriends.isNotEmpty) {
+                  await groupProvider.addMembersToGroup(
+                      groupId, selectedFriends);
+
+                  // Show success toast
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text(
+                            'Group created with ${selectedFriends.length} members!')),
+                  );
+                }
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
             },
             child: const Text('CREATE'),
           ),
@@ -391,140 +599,7 @@ class _GroupsScreenState extends State<GroupsScreen>
       ),
     );
   }
-}
 
-class FriendDetailsScreen extends StatelessWidget {
-  const FriendDetailsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Friend Details'),
-      ),
-      body: Column(
-        children: [
-          _buildGetOweStatus(),
-          Expanded(
-            child: ListView(
-              children: [
-                _buildTransactionItem('Dinner', 'You paid', 20.00),
-                _buildTransactionItem('Movie', 'Friend paid', 15.00),
-                _buildTransactionItem('Groceries', 'You paid', 30.00),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGetOweStatus() {
-    return Builder(builder: (context) {
-      // Access the currency provider
-      final currencyProvider = Provider.of<CurrencyProvider>(context);
-
-      return Container(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildStatusCard(context, 'You Get', 10.00, Colors.green),
-            _buildStatusCard(context, 'You Owe', 5.00, Colors.red),
-          ],
-        ),
-      );
-    });
-  }
-
-  Widget _buildStatusCard(
-      BuildContext context, String title, double amount, Color color) {
-    // Access the currency provider
-    final currencyProvider = Provider.of<CurrencyProvider>(context);
-
-    return Card(
-      elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text(title, style: const TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
-            Text(currencyProvider.format(amount), // Use format method
-                style: TextStyle(
-                    fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTransactionItem(String title, String action, double amount) {
-    return Builder(builder: (context) {
-      // Access the currency provider
-      final currencyProvider = Provider.of<CurrencyProvider>(context);
-
-      return ListTile(
-        title: Text(title),
-        subtitle: Text(action),
-        trailing: Text(currencyProvider.format(amount), // Use format method
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-      );
-    });
-  }
-}
-
-class GroupDetailsScreen extends StatelessWidget {
-  const GroupDetailsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    // Get the currency provider
-    final currencyProvider = Provider.of<CurrencyProvider>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Group Details'),
-      ),
-      body: Column(
-        children: [
-          _buildGroupMembers(),
-          Expanded(
-            child: ListView(
-              children: [
-                _buildTransactionItem(
-                    context, 'Dinner', 'Group expense', 50.00),
-                _buildTransactionItem(context, 'Movie', 'Group expense', 30.00),
-                _buildTransactionItem(
-                    context, 'Groceries', 'Group expense', 40.00),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGroupMembers() {
-    // No changes needed here
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: const Column(
-          // Existing code...
-          ),
-    );
-  }
-
-  Widget _buildTransactionItem(
-      BuildContext context, String title, String action, double amount) {
-    // Get the currency provider
-    final currencyProvider = Provider.of<CurrencyProvider>(context);
-
-    return ListTile(
-      title: Text(title),
-      subtitle: Text(action),
-      trailing: Text(currencyProvider.format(amount),
-          style: const TextStyle(fontWeight: FontWeight.bold)),
-    );
-  }
+// --- Placeholder Detail Screens ---
+// Replace these with actual implementations using providers to fetch data by ID
 }

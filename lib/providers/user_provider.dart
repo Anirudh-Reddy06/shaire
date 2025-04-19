@@ -69,7 +69,7 @@ class UserProvider extends ChangeNotifier {
   // Force refresh user profile
   Future<Map<String, dynamic>> refreshUserProfile() async {
     _isLoading = true;
-    notifyListeners();
+    //notifyListeners();
 
     try {
       final user = _supabase.auth.currentUser;
@@ -79,7 +79,6 @@ class UserProvider extends ChangeNotifier {
 
       final response = await _supabase
           .from('profiles')
-          // --- CHANGE HERE: Select 'currency' instead of 'default_currency' ---
           .select(
               'id, username, full_name, phone, upi_id, currency, profile_complete, avatar_url')
           .eq('id', user.id)

@@ -76,6 +76,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     }
   }
 
+//TODO: Add profile picture upload functionality
   @override
   Widget build(BuildContext context) {
     return Scaffold(
