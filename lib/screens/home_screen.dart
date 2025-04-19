@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shaire/providers/expense_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/currency_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // <-- Add this
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,7 +20,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isLoading = true;
   double _youGet = 0;
   double _youOwe = 0;
-  List<Map<String, dynamic>> _recentActivities = [];
+  final Set<String> _hiddenActivityIds = {};
 
   @override
   void initState() {
@@ -27,9 +29,19 @@ class _HomeScreenState extends State<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     )..forward();
+    _loadHiddenActivityIds().then((_) => _fetchData());
+  }
 
-    // Fetch real data
-    _fetchData();
+  Future<void> _loadHiddenActivityIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _hiddenActivityIds.addAll(prefs.getStringList('hiddenActivityIds') ?? []);
+    });
+  }
+
+  Future<void> _saveHiddenActivityIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('hiddenActivityIds', _hiddenActivityIds.toList());
   }
 
   Future<void> _fetchData() async {
@@ -50,10 +62,8 @@ class _HomeScreenState extends State<HomeScreen>
 
       for (var balance in balancesResponse) {
         if (balance['from_user_id'] == user.id) {
-          // You owe to others
           oweTotalAmount += (balance['amount'] as num).toDouble();
         } else {
-          // Others owe to you
           getTotalAmount += (balance['amount'] as num).toDouble();
         }
       }
@@ -63,30 +73,9 @@ class _HomeScreenState extends State<HomeScreen>
           Provider.of<ExpenseProvider>(context, listen: false);
       await expenseProvider.fetchExpenses();
 
-      // Convert expenses to activity items
-      final activities = <Map<String, dynamic>>[];
-      final groupedExpenses = <String, List<Map<String, dynamic>>>{};
-
-      for (var expense in expenseProvider.expenses.take(10)) {
-        final date = _formatDateKey(expense.date);
-        final activity = {
-          'title': expense.description,
-          'action': expense.createdBy == user.id ? 'You paid' : 'Someone paid',
-          'amount': expense.totalAmount,
-          'icon': _getCategoryIcon(expense.categoryName),
-          'date': expense.date,
-        };
-
-        if (!groupedExpenses.containsKey(date)) {
-          groupedExpenses[date] = [];
-        }
-        groupedExpenses[date]!.add(activity);
-      }
-
       setState(() {
         _youGet = getTotalAmount;
         _youOwe = oweTotalAmount;
-        _recentActivities = activities;
         _isLoading = false;
       });
     } catch (e) {
@@ -131,6 +120,30 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<bool> _onWillPop() async {
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exit App'),
+        content: const Text('Do you want to exit the app?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => exit(0),
+            child: const Text('Exit'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+    return shouldExit ?? false;
+  }
+
   Widget _buildRecentActivities(BuildContext context) {
     return Expanded(
       child: Column(
@@ -160,7 +173,6 @@ class _HomeScreenState extends State<HomeScreen>
     IconData icon,
   ) {
     final currencyProvider = Provider.of<CurrencyProvider>(context);
-
     return Expanded(
       child: Row(
         children: [
@@ -202,10 +214,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildActivityItem(
     BuildContext context,
+    String id,
     String title,
     String action,
     double amount,
     IconData icon,
+    VoidCallback onRemove,
   ) {
     final currencyProvider = Provider.of<CurrencyProvider>(context);
 
@@ -242,31 +256,172 @@ class _HomeScreenState extends State<HomeScreen>
               currencyProvider.format(amount),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.redAccent),
+              tooltip: 'Remove from Recent Activity',
+              onPressed: onRemove,
+            ),
           ],
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : RefreshIndicator(
-                onRefresh: _fetchData,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 16),
-                    _buildBalanceSection(context),
-                    const SizedBox(height: 24),
-                    _buildRecentActivities(context),
-                  ],
-                ),
+  Widget _buildActivityList(BuildContext context) {
+    final expenseProvider = Provider.of<ExpenseProvider>(context);
+    final expenses = expenseProvider.expenses;
+
+    // Group expenses by date, skipping hidden ones
+    final groupedActivities = <String, List<Map<String, dynamic>>>{};
+
+    for (var expense in expenses.take(10)) {
+      final String expenseId = expense.id.toString();
+      if (_hiddenActivityIds.contains(expenseId)) continue;
+
+      final dateKey = _formatDateKey(expense.date);
+      final user = Supabase.instance.client.auth.currentUser;
+      final isMyExpense = expense.createdBy == user?.id;
+
+      if (!groupedActivities.containsKey(dateKey)) {
+        groupedActivities[dateKey] = [];
+      }
+      groupedActivities[dateKey]!.add({
+        'id': expenseId,
+        'title': expense.description,
+        'action': isMyExpense ? 'You paid' : 'Someone paid',
+        'amount': expense.totalAmount,
+        'icon': _getCategoryIcon(expense.categoryName),
+      });
+    }
+
+    if (groupedActivities.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'No recent activities',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final sortedDates = groupedActivities.keys.toList()
+      ..sort((a, b) {
+        if (a == 'Today') return -1;
+        if (b == 'Today') return 1;
+        if (a == 'Yesterday') return -1;
+        if (b == 'Yesterday') return 1;
+        return b.compareTo(a);
+      });
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: sortedDates.length,
+      itemBuilder: (context, index) {
+        final date = sortedDates[index];
+        final items = groupedActivities[date]!;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
+              child: Text(
+                date,
+                style: Theme.of(context).textTheme.bodyLarge!.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
               ),
-      ),
+            ),
+            ...items.map((item) {
+              return Dismissible(
+                key: Key(item['id']),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  color: Colors.redAccent,
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: const Icon(Icons.delete, color: Colors.white),
+                ),
+                confirmDismiss: (direction) async {
+                  return await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Remove Activity'),
+                      content: const Text(
+                          'Are you sure you want to remove this activity from recent activity?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Remove',
+                              style: TextStyle(color: Colors.red)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                onDismissed: (direction) async {
+                  setState(() {
+                    _hiddenActivityIds.add(item['id']);
+                  });
+                  await _saveHiddenActivityIds();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Removed from recent activity')),
+                  );
+                },
+                child: _buildActivityItem(
+                  context,
+                  item['id'],
+                  item['title'],
+                  item['action'],
+                  item['amount'],
+                  item['icon'],
+                  () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Remove Activity'),
+                        content: const Text(
+                            'Are you sure you want to remove this activity from recent activity?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text('Remove',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed == true) {
+                      setState(() {
+                        _hiddenActivityIds.add(item['id']);
+                      });
+                      await _saveHiddenActivityIds();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Removed from recent activity')),
+                      );
+                    }
+                  },
+                ),
+              );
+            }),
+          ],
+        );
+      },
     );
   }
 
@@ -274,7 +429,6 @@ class _HomeScreenState extends State<HomeScreen>
     final theme = Theme.of(context);
     final netBalance = _youGet - _youOwe;
     final currencyProvider = Provider.of<CurrencyProvider>(context);
-
     return SlideTransition(
       position: Tween<Offset>(
         begin: const Offset(0, 0.1),
@@ -358,85 +512,28 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildActivityList(BuildContext context) {
-    // Use real activities grouped by date
-    final expenseProvider = Provider.of<ExpenseProvider>(context);
-    final expenses = expenseProvider.expenses;
-
-    // Group expenses by date
-    final groupedActivities = <String, List<Map<String, dynamic>>>{};
-
-    for (var expense in expenses.take(10)) {
-      final dateKey = _formatDateKey(expense.date);
-
-      if (!groupedActivities.containsKey(dateKey)) {
-        groupedActivities[dateKey] = [];
-      }
-
-      final user = Supabase.instance.client.auth.currentUser;
-      final isMyExpense = expense.createdBy == user?.id;
-
-      groupedActivities[dateKey]!.add({
-        'title': expense.description,
-        'action': isMyExpense ? 'You paid' : 'Someone paid',
-        'amount': expense.totalAmount,
-        'icon': _getCategoryIcon(expense.categoryName),
-      });
-    }
-
-    if (groupedActivities.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(
-            'No recent activities',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        body: SafeArea(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _fetchData,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 16),
+                      _buildBalanceSection(context),
+                      const SizedBox(height: 24),
+                      _buildRecentActivities(context),
+                    ],
+                  ),
+                ),
         ),
-      );
-    }
-
-    final sortedDates = groupedActivities.keys.toList()
-      ..sort((a, b) {
-        if (a == 'Today') return -1;
-        if (b == 'Today') return 1;
-        if (a == 'Yesterday') return -1;
-        if (b == 'Yesterday') return 1;
-        return b.compareTo(a); // Most recent first
-      });
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: sortedDates.length,
-      itemBuilder: (context, index) {
-        final date = sortedDates[index];
-        final items = groupedActivities[date]!;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
-              child: Text(
-                date,
-                style: Theme.of(context).textTheme.bodyLarge!.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-            ),
-            ...items.map((item) => _buildActivityItem(
-                  context,
-                  item['title'],
-                  item['action'],
-                  item['amount'],
-                  item['icon'],
-                )),
-          ],
-        );
-      },
+      ),
     );
   }
 }

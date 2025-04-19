@@ -172,7 +172,7 @@ class _GroupsScreenState extends State<GroupsScreen>
     final List<Map<String, dynamic>> pendingRequests =
         friendProvider.pendingReceived;
     final List<Map<String, dynamic>> filteredFriends = friendProvider.friends
-        .where((friend) => (friend['username'] ?? friend['full_name'] ?? '')
+        .where((friend) => (friend['full_name'] ?? friend['username'] ?? '')
             .toLowerCase()
             .contains(_searchQuery.toLowerCase()))
         .toList();

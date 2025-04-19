@@ -11,7 +11,6 @@ import '../services/logger_service.dart';
 import '../providers/currency_provider.dart';
 import '../database/receipt.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   final int? groupId;

@@ -475,8 +475,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             sideTitles: SideTitles(
                               showTitles: true,
                               getTitlesWidget: (value, meta) {
-                                if (value < 0 || value >= _weekLabels.length)
+                                if (value < 0 || value >= _weekLabels.length) {
                                   return const Text('');
+                                }
                                 return Padding(
                                   padding: const EdgeInsets.only(top: 8.0),
                                   child: Text(

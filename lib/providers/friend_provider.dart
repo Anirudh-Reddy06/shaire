@@ -108,8 +108,9 @@ class FriendProvider with ChangeNotifier {
 
   Future<void> sendFriendRequest(String usernameOrEmail) async {
     if (currentUserId == null) throw Exception("Not logged in");
-    if (usernameOrEmail.trim().isEmpty)
+    if (usernameOrEmail.trim().isEmpty) {
       throw Exception("Username/Email cannot be empty");
+    }
 
     _isLoading = true;
     notifyListeners();

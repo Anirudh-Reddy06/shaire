@@ -1,0 +1,2 @@
+D:/ML_Project/Shaire/shaire/android/app/.cxx/Debug/1j3h6n12/x86/CMakeFiles/edit_cache.dir
+D:/ML_Project/Shaire/shaire/android/app/.cxx/Debug/1j3h6n12/x86/CMakeFiles/rebuild_cache.dir
