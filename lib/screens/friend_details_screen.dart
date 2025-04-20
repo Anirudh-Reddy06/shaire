@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../providers/expense_provider.dart';
 import 'add_expense_screen.dart';
 
 class FriendDetailsScreen extends StatefulWidget {
@@ -26,19 +28,29 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
   late TabController _tabController;
   final _currencyFormatter = NumberFormat.currency(symbol: '\$');
   String? _currentUserId;
+  late ExpenseProvider _expenseProvider;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _currentUserId = _supabase.auth.currentUser?.id;
+    _expenseProvider = Provider.of<ExpenseProvider>(context, listen: false);
+    _expenseProvider.addListener(_onExpensesChanged);
     _loadFriendDetails();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _expenseProvider.removeListener(_onExpensesChanged);
     super.dispose();
+  }
+
+  void _onExpensesChanged() {
+    if (mounted) {
+      _loadFriendDetails();
+    }
   }
 
   Future<void> _loadFriendDetails() async {
@@ -217,56 +229,8 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'You owe',
-                            style: TextStyle(
-                              color: Colors.grey.shade700,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _currencyFormatter.format(_youOwe),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            'You are owed',
-                            style: TextStyle(
-                              color: Colors.grey.shade700,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _currencyFormatter.format(_youAreOwed),
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 32),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
                       Text(
-                        'Net Balance',
+                        _netBalance >= 0 ? 'You are owed' : 'You owe',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -274,12 +238,10 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
                         ),
                       ),
                       Text(
-                        _netBalance >= 0
-                            ? '$friendName owes you ${_currencyFormatter.format(_netBalance.abs())}'
-                            : 'You owe $friendName ${_currencyFormatter.format(_netBalance.abs())}',
+                        _currencyFormatter.format(_netBalance.abs()),
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                          fontSize: 18,
                           color: _netBalance >= 0 ? Colors.green : Colors.red,
                         ),
                       ),
