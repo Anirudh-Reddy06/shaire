@@ -26,7 +26,7 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
   double _netBalance = 0.0;
 
   late TabController _tabController;
-  final _currencyFormatter = NumberFormat.currency(symbol: '\$');
+  final _currencyFormatter = NumberFormat.currency(symbol: '₹');
   String? _currentUserId;
   late ExpenseProvider _expenseProvider;
 
@@ -465,7 +465,7 @@ class SettleUpDialog extends StatefulWidget {
 
 class _SettleUpDialogState extends State<SettleUpDialog> {
   late TextEditingController _amountController;
-  final _formatter = NumberFormat.currency(symbol: '\$');
+  final _formatter = NumberFormat.currency(symbol: '₹');
   bool _useFullAmount = true;
 
   @override
@@ -513,7 +513,7 @@ class _SettleUpDialogState extends State<SettleUpDialog> {
               controller: _amountController,
               decoration: const InputDecoration(
                 labelText: 'Amount',
-                prefixText: '\$',
+                prefixText: '₹',
               ),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
