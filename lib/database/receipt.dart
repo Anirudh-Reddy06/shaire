@@ -81,7 +81,6 @@ class ReceiptService {
   /// Update an existing receipt
   Future<bool> updateReceipt(Receipt receipt) async {
     try {
-      // Make sure id is not null before using it
       await supabase
           .from('receipts')
           .update(receipt.toJson())
@@ -108,52 +107,69 @@ class ReceiptService {
   }
 
   /// Upload a receipt image and save to database
-  Future<Receipt?> uploadReceipt(File imageFile) async {
+  Future<Receipt?> uploadReceipt(File file) async {
     try {
-      final user = supabase.auth.currentUser;
+      // 1. Compress the image before uploading
+      final compressedFile = await _compressImage(file);
 
-      if (user == null) {
-        LoggerService.error('User not authenticated');
-        throw Exception('User not authenticated');
-      }
-
-      // Compress the image first
-      LoggerService.info('Compressing receipt image');
-      final compressedFile = await _compressImage(imageFile);
-
-      // Generate a unique file name
-      final fileExt = path.extension(imageFile.path);
+      // 2. Generate a unique filename
+      final fileExt = path.extension(compressedFile.path);
       final fileName = '${const Uuid().v4()}$fileExt';
+      final storagePath = 'receipts/$fileName';
 
-      // Upload to Supabase Storage
-      LoggerService.info('Uploading receipt to storage: ${user.id}/$fileName');
-      await supabase.storage
+      // 3. Upload to Supabase Storage
+      final response = await supabase.storage
           .from('receipts')
-          .upload('${user.id}/$fileName', compressedFile);
+          .upload(
+            storagePath,
+            compressedFile,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: true,
+            ),
+          );
 
-      // Get public URL for the uploaded file
-      final imageUrl = supabase.storage
+      LoggerService.debug('Receipt uploaded: $response');
+
+      // 4. Get the public URL for the uploaded image
+      final publicUrl = supabase.storage
           .from('receipts')
-          .getPublicUrl('${user.id}/$fileName');
-      LoggerService.info('Receipt image URL: $imageUrl');
+          .getPublicUrl(storagePath);
 
-      // Create receipt record in database
-      final now = DateTime.now();
+      LoggerService.debug('Public URL: $publicUrl');
+
+      // 5. Save receipt record to database
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) throw Exception('User not authenticated');
+
       final receiptData = {
-        'image_url': imageUrl,
-        'created_at': now.toIso8601String(),
-        'user_id': user.id
+        'image_url': publicUrl,
+        'created_at': DateTime.now().toIso8601String(),
+        'user_id': userId,
       };
 
-      LoggerService.info('Creating receipt record in database');
-      final result =
-          await supabase.from('receipts').insert(receiptData).select().single();
+      final insertResponse = await supabase
+          .from('receipts')
+          .insert(receiptData)
+          .select()
+          .single();
 
-      LoggerService.info('Receipt created with ID: ${result['id']}');
-      return Receipt.fromJson(result);
+      LoggerService.debug('Receipt DB insert: $insertResponse');
+
+      return Receipt.fromJson(insertResponse);
+
+    } on StorageException catch (e) {
+      LoggerService.error('Storage error during upload', e);
+
+      if (e.statusCode == 413) {
+        throw Exception('Image too large. Compress below 50MB');
+      } else if (e.statusCode == 404) {
+        throw Exception('Storage configuration error');
+      }
+      rethrow;
     } catch (e) {
-      LoggerService.error('Error uploading receipt', e);
-      return null;
+      LoggerService.error('General upload error', e);
+      rethrow;
     }
   }
 
@@ -164,19 +180,15 @@ class ReceiptService {
         '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}_compressed.jpg';
 
     try {
-      // Log original file size
       LoggerService.debug('Original image size: ${file.lengthSync()} bytes');
 
-      // Compress the file
       final result = await FlutterImageCompress.compressAndGetFile(
         file.absolute.path,
         targetPath,
         quality: 85,
       );
 
-      // Check if compression was successful
       if (result != null) {
-        // Convert XFile to File and check size
         final compressedFile = File(result.path);
         LoggerService.debug(
             'Compressed image size: ${compressedFile.lengthSync()} bytes');
@@ -187,7 +199,7 @@ class ReceiptService {
       }
     } catch (e) {
       LoggerService.error('Error during compression', e);
-      return file; // Return original file on error
+      return file;
     }
   }
 

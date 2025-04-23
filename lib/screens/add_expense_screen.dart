@@ -11,6 +11,7 @@ import '../services/logger_service.dart';
 import '../providers/currency_provider.dart';
 import '../database/receipt.dart';
 import 'package:provider/provider.dart';
+import 'package:image/image.dart' as img;
 
 class AddExpenseScreen extends StatefulWidget {
   final int? groupId;
@@ -130,11 +131,17 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
     // Equal split calculation
     if (_splitType == SplitType.equal) {
       final totalAmount = double.tryParse(_totalAmountController.text) ?? 0;
-      final perPersonAmount = _selectedContactsData.isEmpty
-          ? 0
-          : totalAmount / (_selectedContactsData.length + 1);
+      final totalParticipants = _selectedContactsData.length + 1; // You + friends
+      final perPersonAmount =
+          totalParticipants > 0 ? totalAmount / totalParticipants : 0;
 
-      // Update all equal split amounts (used for display)
+      // Update YOUR share (paid full amount)
+      if (_selectedContactsData.isNotEmpty) {
+        _individualAmountControllers['you']?.text =
+            perPersonAmount.toStringAsFixed(2);
+      }
+
+      // Update friends' shares
       for (final contact in _selectedContactsData) {
         final id = contact['id'].toString();
         _individualAmountControllers[id]?.text =
@@ -975,13 +982,20 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
     }
   }
 
+Future<File> _compressImage(File file) async {
+  final image = img.decodeImage(await file.readAsBytes());
+  final resized = img.copyResize(image!, width: 1024);
+  return File(file.path)
+    ..writeAsBytesSync(img.encodeJpg(resized, quality: 85));
+}
+
   Future<void> _getImageAndProcess(ImageSource source) async {
     try {
       final ImagePicker picker = ImagePicker();
       final XFile? pickedFile = await picker.pickImage(source: source);
 
       if (pickedFile == null) return;
-
+      
       setState(() => _isLoading = true);
 
       final file = File(pickedFile.path);
@@ -990,15 +1004,38 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
       try {
         // Upload receipt
-        receipt = await _receiptService.uploadReceipt(file);
-        if (receipt != null) {
-          _currentReceiptId = receipt.id;
-        }
+        final compressedFile = await _compressImage(file);
 
         // Process image with OCR
         billResult = await _billService.extractBillInfo(file);
-
         LoggerService.debug('Bill OCR result: $billResult');
+
+        setState(() {
+        // Update controllers and bill entries for UI
+        if (billResult.containsKey('merchant_name')) {
+          _descriptionController.text = billResult['merchant_name'].toString();
+          _guessCategory();
+        }
+        if (billResult.containsKey('total_amount')) {
+          _totalAmountController.text = billResult['total_amount'].toString();
+        }
+        _billEntries.clear();
+        if (billResult.containsKey('items') && billResult['items'] is List) {
+          for (final item in billResult['items']) {
+            if (item is Map && item.containsKey('description') && item.containsKey('amount')) {
+              _billEntries.add(
+                BillEntry(
+                  description: item['description'].toString(),
+                  amount: double.tryParse(item['amount'].toString()) ?? 0.0,
+                  assignedTo: [],
+                  type: BillEntryType.item,
+                ),
+              );
+            }
+          }
+        }
+      });
+
       } catch (e) {
         LoggerService.error('OCR processing failed', e);
         billResult = {}; // Empty result if OCR fails
