@@ -317,9 +317,21 @@ class _GroupsScreenState extends State<GroupsScreen>
                                 }
                                 final youGet = snapshot.data?['youAreOwed'] ?? 0.0;
                                 final youOwe = snapshot.data?['youOwe'] ?? 0.0;
-                                return Text(
-                                  'You get ${currencyProvider.format(youGet)}, You owe ${currencyProvider.format(youOwe)}',
-                                );
+                                final netBalance = youGet - youOwe;
+                                
+                                if (netBalance > 0) {
+                                  return Text(
+                                    'You get ${currencyProvider.format(netBalance)}',
+                                    style: const TextStyle(color: Colors.green),
+                                  );
+                                } else if (netBalance < 0) {
+                                  return Text(
+                                    'You owe ${currencyProvider.format(netBalance.abs())}',
+                                    style: const TextStyle(color: Colors.red),
+                                  );
+                                } else {
+                                  return const Text('Settled up');
+                                }
                               },
                             ),
 
