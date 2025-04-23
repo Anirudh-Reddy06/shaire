@@ -353,7 +353,7 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
                                       )
                                     else if (youAreOwed > 0)
                                       Text(
-                                        'Friend owes you ${_currencyFormatter.format(youAreOwed)}',
+                                        '${_friendProfile?['full_name'] ?? 'Friend'} owes you ${_currencyFormatter.format(youAreOwed)}',
                                         style: const TextStyle(
                                             color: Colors.green),
                                       )
