@@ -304,7 +304,7 @@ class _MainScreenState extends State<MainScreen> {
               MaterialPageRoute(builder: (context) => const AddExpenseScreen()))
           .then((_) {
         // Refresh expenses data when returning from the add expense screen
-        if (_selectedIndex == 3) {
+        if (_selectedIndex == 3 || _selectedIndex == 3) {
           // Expenses tab
           Provider.of<ExpenseProvider>(context, listen: false).fetchExpenses();
         }

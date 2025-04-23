@@ -61,10 +61,19 @@ class _HomeScreenState extends State<HomeScreen>
       double oweTotalAmount = 0;
 
       for (var balance in balancesResponse) {
+        final double amount = (balance['amount'] as num).toDouble();
         if (balance['from_user_id'] == user.id) {
-          oweTotalAmount += (balance['amount'] as num).toDouble();
+          if (amount > 0) {
+            getTotalAmount += amount;
+          } else {
+            oweTotalAmount += -amount;
+          }
         } else {
-          getTotalAmount += (balance['amount'] as num).toDouble();
+          if (amount > 0) {
+            oweTotalAmount += amount;
+          } else {
+            getTotalAmount += -amount;
+          }
         }
       }
 
@@ -133,10 +142,10 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           TextButton(
             onPressed: () => exit(0),
-            child: const Text('Exit'),
             style: TextButton.styleFrom(
               foregroundColor: Colors.red,
             ),
+            child: const Text('Exit'),
           ),
         ],
       ),
