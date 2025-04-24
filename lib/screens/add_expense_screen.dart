@@ -643,6 +643,10 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
         Provider.of<CurrencyProvider>(context, listen: false);
     final totalAmount = double.tryParse(_totalAmountController.text) ?? 0;
 
+    // Ensure controller for "You" exists
+    _individualAmountControllers['you'] ??=
+        TextEditingController(text: (totalAmount / (_selectedContactsData.length + 1)).toStringAsFixed(2));
+
     return ListView(
       children: [
         // Current user (you)
@@ -656,6 +660,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
               SizedBox(
                 width: 120,
                 child: TextField(
+                  controller: _individualAmountControllers['you'],
                   decoration: InputDecoration(
                     border: const OutlineInputBorder(),
                     prefixText: currencyProvider.currencySymbol,
@@ -665,12 +670,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d+\.?\d{0,2}')),
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
                   ],
-                  controller: TextEditingController(
-                      text: (totalAmount / (_selectedContactsData.length + 1))
-                          .toStringAsFixed(2)),
                 ),
               ),
             ],
@@ -681,10 +682,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
         ..._selectedContactsData.map((contact) {
           final id = contact['id'].toString();
 
-          // Create controller if it doesn't exist
+          // Ensure controller exists for each contact
           _individualAmountControllers[id] ??= TextEditingController(
-              text: (totalAmount / (_selectedContactsData.length + 1))
-                  .toStringAsFixed(2));
+              text: (totalAmount / (_selectedContactsData.length + 1)).toStringAsFixed(2));
 
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -1048,17 +1048,18 @@ Future<File> _compressImage(File file) async {
 
         // Add items from OCR
         for (final item in items) {
-          if (item is Map &&
-              item.containsKey('description') &&
-              item.containsKey('price')) {
-            _billEntries.add(
-              BillEntry(
-                description: item['description'].toString(),
-                amount: double.tryParse(item['price'].toString()) ?? 0.0,
-                assignedTo: [],
-                type: BillEntryType.item,
-              ),
-            );
+          if (item is Map && item.containsKey('description')) {
+            final price = item['price'] ?? item['amount'];
+            if (price != null) {
+              _billEntries.add(
+                BillEntry(
+                  description: item['description'].toString(),
+                  amount: double.tryParse(price.toString()) ?? 0.0,
+                  assignedTo: [],
+                  type: BillEntryType.item,
+                ),
+              );
+            }
           }
         }
 
@@ -1150,6 +1151,7 @@ Future<File> _compressImage(File file) async {
                     );
                   });
                 }
+                _updateAmountsBasedOnItemAssignments();
                 Navigator.pop(context);
               },
             ),
@@ -1173,6 +1175,7 @@ Future<File> _compressImage(File file) async {
                         );
                       });
                     }
+                    _updateAmountsBasedOnItemAssignments();
                     Navigator.pop(context);
                   },
                 )),
@@ -1192,6 +1195,7 @@ Future<File> _compressImage(File file) async {
                     );
                   });
                 }
+                _updateAmountsBasedOnItemAssignments();
                 Navigator.pop(context);
               },
             ),
@@ -1211,6 +1215,7 @@ Future<File> _compressImage(File file) async {
                     );
                   });
                 }
+                _updateAmountsBasedOnItemAssignments();
                 Navigator.pop(context);
               },
             ),
@@ -1220,62 +1225,74 @@ Future<File> _compressImage(File file) async {
     );
   }
 
+  void _updateAmountsBasedOnItemAssignments() {
+  // Skip if no items or contacts
+  if (_billEntries.isEmpty || _selectedContactsData.isEmpty) return;
+  
+  // Switch to manual split
+  _tabController.animateTo(SplitType.manual.index);
+  _splitType = SplitType.manual;
+  
+  // Calculate amounts per person based on item assignments
+  Map<String, double> personAmounts = {};
+  
+  // Initialize all people with zero amounts
+  for (final contact in _selectedContactsData) {
+    personAmounts[contact['name']] = 0;
+  }
+  personAmounts['You'] = 0; // Current user
+  
+  // Calculate each person's share based on assigned items
+  for (final item in _billEntries) {
+    if (item.assignedTo.isEmpty) continue;
+    
+    // Split item amount equally among assignees
+    final perPersonAmount = item.amount / item.assignedTo.length;
+    
+    // Add to each person's total
+    for (final assignee in item.assignedTo) {
+      personAmounts[assignee] = (personAmounts[assignee] ?? 0) + perPersonAmount;
+    }
+  }
+  
+  // Update controllers for each contact
+  for (final contact in _selectedContactsData) {
+    final id = contact['id'].toString();
+    final name = contact['name'] as String;
+    _individualAmountControllers[id]?.text = 
+        (personAmounts[name] ?? 0).toStringAsFixed(2);
+  }
+  
+  // Update "You" controller
+  _individualAmountControllers['you']?.text = 
+      (personAmounts['You'] ?? 0).toStringAsFixed(2);
+  
+  setState(() {});
+}
+
+
   void _assignItemToContacts(BillEntry item, int index) {
     // Get all available names
-    final allNames =
-        _selectedContactsData.map((c) => c['name'] as String).toList();
+    final allNames = _selectedContactsData.map((c) => c['name'] as String).toList();
     allNames.add('You'); // Add current user
-
-    final selectedNames = List<String>.from(item.assignedTo);
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Assign "${item.description}"'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: allNames.length,
-            itemBuilder: (context, i) {
-              final name = allNames[i];
-              final isSelected = selectedNames.contains(name);
-
-              return CheckboxListTile(
-                title: Text(name),
-                value: isSelected,
-                onChanged: (bool? value) {
-                  if (value == true) {
-                    selectedNames.add(name);
-                  } else {
-                    selectedNames.remove(name);
-                  }
-                  setState(() {}); // Refresh UI
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _billEntries[index] = BillEntry(
-                  description: item.description,
-                  amount: item.amount,
-                  assignedTo: selectedNames,
-                  type: item.type,
-                );
-              });
-              Navigator.pop(context);
-            },
-            child: const Text('SAVE'),
-          ),
-        ],
+      builder: (context) => _AssignItemDialog(
+        itemDescription: item.description,
+        allNames: allNames,
+        initialSelectedNames: List<String>.from(item.assignedTo),
+        onSave: (selectedNames) {
+          setState(() {
+            _billEntries[index] = BillEntry(
+              description: item.description,
+              amount: item.amount,
+              assignedTo: selectedNames,
+              type: item.type,
+            );
+            _updateAmountsBasedOnItemAssignments();
+          });
+        },
       ),
     );
   }
@@ -1727,3 +1744,75 @@ class BillEntry {
 }
 
 enum BillEntryType { item, tax, discount }
+
+class _AssignItemDialog extends StatefulWidget {
+  final String itemDescription;
+  final List<String> allNames;
+  final List<String> initialSelectedNames;
+  final Function(List<String>) onSave;
+
+  const _AssignItemDialog({
+    required this.itemDescription,
+    required this.allNames,
+    required this.initialSelectedNames,
+    required this.onSave,
+  });
+
+  @override
+  State<_AssignItemDialog> createState() => _AssignItemDialogState();
+}
+
+class _AssignItemDialogState extends State<_AssignItemDialog> {
+  late List<String> selectedNames;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedNames = List<String>.from(widget.initialSelectedNames);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Assign "${widget.itemDescription}"'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: widget.allNames.length,
+          itemBuilder: (context, i) {
+            final name = widget.allNames[i];
+            return CheckboxListTile(
+              title: Text(name),
+              value: selectedNames.contains(name),
+              onChanged: (bool? value) {
+                setState(() {
+                  if (value == true) {
+                    if (!selectedNames.contains(name)) {
+                      selectedNames.add(name);
+                    }
+                  } else {
+                    selectedNames.remove(name);
+                  }
+                });
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('CANCEL'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            widget.onSave(selectedNames);
+            Navigator.pop(context);
+          },
+          child: const Text('SAVE'),
+        ),
+      ],
+    );
+  }
+}

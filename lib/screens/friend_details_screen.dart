@@ -56,7 +56,7 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
   Future<void> _loadFriendDetails() async {
   setState(() => _loading = true);
   try {
-    // 1. Load friend's profile
+    // 1. Load friend's profile (unchanged)
     final profileRes = await _supabase
         .from('profiles')
         .select('full_name, username, avatar_url')
@@ -65,9 +65,9 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
 
     _friendProfile = profileRes;
 
-    // 2. Load expenses shared with this friend
+    // 2. Load expenses with fixed RPC function
     final expensesRes = await _supabase.rpc(
-      'get_shared_expenses_with_friend',
+      'get_shared_expenses',
       params: {
         'p_current_user_id': _currentUserId,
         'p_friend_id': widget.friendId,
@@ -80,17 +80,20 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
 
     for (final e in expensesRes) {
       final amount = e['total_amount'] as num;
-      final friendShare = e['friend_share'] as num? ?? 0;
-      final friendPaid = e['friend_paid'] as num? ?? 0;
+      final yourShare = e['your_share'] as num? ?? 0;
+      final friendShare = amount - yourShare; // Calculate friend's share
       final youPaid = e['you_paid'] as num? ?? 0;
+      final friendPaid = e['friend_paid'] as num? ?? 0;
 
-      // Calculate net balance for THIS FRIEND
-      if (friendShare > friendPaid) {
-        // Friend owes you
-        _youAreOwed += friendShare - friendPaid;
-      } else if (friendPaid > friendShare) {
-        // You owe friend (they overpaid)
-        _youOwe += friendPaid - friendShare;
+      // Fix balance calculation for each expense
+      if (youPaid > yourShare) {
+        // You paid more than your share, friend owes you
+        _youAreOwed += (youPaid - yourShare);
+      }
+      
+      if (friendPaid > friendShare) {
+        // Friend paid more than their share, you owe them
+        _youOwe += (friendPaid - friendShare);
       }
 
       _expenses.add({
@@ -99,9 +102,9 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
         'amount': amount,
         'date': DateTime.parse(e['date'] as String),
         'creator_name': e['creator_name'],
-        'friend_share': friendShare,
-        'friend_paid': friendPaid,
+        'your_share': yourShare,
         'you_paid': youPaid,
+        'friend_paid': friendPaid,
       });
     }
 
@@ -115,6 +118,7 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
     }
   }
 }
+
 
 
   void _navigateToAddExpense() {
@@ -312,63 +316,61 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
                         child: ListView.builder(
                           itemCount: _expenses.length,
                           itemBuilder: (ctx, i) {
-                          final exp = _expenses[i];
-                          final amount = exp['amount'] as num;
-                          final friendShare = exp['friend_share'] as num;
-                          final friendPaid = exp['friend_paid'] as num;
-                          final date = exp['date'] as DateTime;
+                            final exp = _expenses[i];
+                            final amount = exp['amount'] as num;
+                            final yourShare = exp['your_share'] as num;
+                            final friendShare = amount - yourShare;
+                            final youPaid = exp['you_paid'] as num;
+                            final friendPaid = exp['friend_paid'] as num;
+                            final date = exp['date'] as DateTime;
 
-                          final friendOwed = friendShare > friendPaid 
-                              ? friendShare - friendPaid 
-                              : 0.0;
-                          final youOweFriend = friendPaid > friendShare 
-                              ? friendPaid - friendShare 
-                              : 0.0;
+                            // Calculate what's owed on this specific expense
+                            final friendOwesYou = youPaid > yourShare ? youPaid - yourShare : 0.0;
+                            final youOweFriend = friendPaid > friendShare ? friendPaid - friendShare : 0.0;
 
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: colorScheme.primaryContainer,
-                                child: const Icon(Icons.receipt_long),
-                              ),
-                              title: Text(
-                                exp['description'] as String,
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Total: ${_currencyFormatter.format(amount)}'),
-                                  const SizedBox(height: 2),
-                                  if (friendOwed > 0)
+                            return Card(
+                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: colorScheme.primaryContainer,
+                                  child: const Icon(Icons.receipt_long),
+                                ),
+                                title: Text(
+                                  exp['description'] as String,
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Total: ${_currencyFormatter.format(amount)}'),
+                                    const SizedBox(height: 2),
+                                    if (friendOwesYou > 0)
+                                      Text(
+                                        '${_friendProfile?['full_name']} owes you ${_currencyFormatter.format(friendOwesYou)}',
+                                        style: const TextStyle(color: Colors.green),
+                                      )
+                                    else if (youOweFriend > 0)
+                                      Text(
+                                        'You owe ${_currencyFormatter.format(youOweFriend)}',
+                                        style: const TextStyle(color: Colors.red),
+                                      )
+                                    else
+                                      const Text('Settled'),
+                                    const SizedBox(height: 2),
                                     Text(
-                                      '${_friendProfile?['full_name']} owes you ${_currencyFormatter.format(friendOwed)}',
-                                      style: const TextStyle(color: Colors.green),
-                                    )
-                                  else if (youOweFriend > 0)
-                                    Text(
-                                      'You owe ${_currencyFormatter.format(youOweFriend)}',
-                                      style: const TextStyle(color: Colors.red),
-                                    )
-                                  else
-                                    const Text('Settled'),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    DateFormat('MMM d, yyyy').format(date),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600,
+                                      DateFormat('MMM d, yyyy').format(date),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
+                                isThreeLine: true,
                               ),
-                              isThreeLine: true,
-                            ),
-                          );
-                        },
-
-                        ),
+                            );
+                          },
+                        )
                       ),
 
                 // Summary Tab - Payment history and other details
