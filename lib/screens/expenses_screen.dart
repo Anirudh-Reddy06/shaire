@@ -179,13 +179,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final now = DateTime.now();
     final currentWeek = _getWeekNumber(now);
 
-    // Generate week labels for the last 5 weeks and 2 future weeks
+    // Generate week labels for the last 2 weeks and 2 future weeks
     _weekLabels = [];
-    final weeklyData = List<double>.filled(7, 0);
-    _currentWeekIndex = 4; // "This week" index
+    final weeklyData = List<double>.filled(5, 0); // 5 weeks total
+    _currentWeekIndex = 2; // "This week" index is in the middle
 
     // Generate week labels
-    for (int i = -4; i <= 2; i++) {
+    for (int i = -2; i <= 2; i++) {
       final weekDate = DateTime(now.year, now.month, now.day + (i * 7));
       final weekLabel = i == 0
           ? 'This week'
@@ -200,24 +200,57 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     // Group expenses by week
     for (var expense in expenses) {
       final weekDiff = _getWeekDifference(expense.date, now);
-      if (weekDiff >= -4 && weekDiff <= 0) {
-        // Only past 4 weeks and current week
-        final index = weekDiff + 4; // Convert to array index (0-4)
+      if (weekDiff >= -2 && weekDiff <= 0) {
+        // Only past 2 weeks and current week
+        final index = weekDiff + 2; // Convert to array index (0-2)
         weeklyData[index] += expense.totalAmount;
       }
     }
 
     // Calculate week-over-week change percentage
-    if (weeklyData[3] > 0) {
+    if (weeklyData[1] > 0) {
       // If there's data for last week
       _expenseChangePercent =
-          ((weeklyData[4] - weeklyData[3]) / weeklyData[3]) * 100;
+          ((weeklyData[2] - weeklyData[1]) / weeklyData[1]) * 100;
     } else {
       _expenseChangePercent = 0;
     }
 
     // Store weekly data
     _weeklyExpensesData = [weeklyData];
+
+    // Update future predictions
+    final predictionProvider =
+        Provider.of<PredictionProvider>(context, listen: false);
+    if (!predictionProvider.hasError &&
+        predictionProvider.futurePredictions.isNotEmpty) {
+      final now = DateTime.now();
+      final daysUntilNextMonday = 8 - now.weekday;
+      final startOfNextWeek =
+          DateTime(now.year, now.month, now.day + daysUntilNextMonday);
+      final startOfWeekAfterNext =
+          startOfNextWeek.add(const Duration(days: 7));
+      final startOfTwoWeeksAfterNext =
+          startOfWeekAfterNext.add(const Duration(days: 7));
+
+      double nextWeekPredictedTotal = 0;
+      double weekAfterNextPredictedTotal = 0;
+
+      for (final prediction in predictionProvider.futurePredictions) {
+        final predictionDate = prediction.date;
+        if (!predictionDate.isBefore(startOfNextWeek) &&
+            predictionDate.isBefore(startOfWeekAfterNext)) {
+          nextWeekPredictedTotal += prediction.predictedAmount;
+        } else if (!predictionDate.isBefore(startOfWeekAfterNext) &&
+            predictionDate.isBefore(startOfTwoWeeksAfterNext)) {
+          weekAfterNextPredictedTotal += prediction.predictedAmount;
+        }
+      }
+
+      // Update the predictions in the weekly data
+      _weeklyExpensesData[0][3] = nextWeekPredictedTotal;     // In 1w
+      _weeklyExpensesData[0][4] = weekAfterNextPredictedTotal; // In 2w
+    }
   }
 
   // Helper to get week number from date
@@ -528,86 +561,91 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Weekly Spending',
-              style: Theme.of(context).textTheme.titleLarge,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Text(
+                'Weekly Spending',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
             const SizedBox(height: 24),
             SizedBox(
               height: 200,
               child: _weeklyExpensesData.isEmpty
                   ? const Center(child: Text('No expense data available'))
-                  : BarChart(
-                      BarChartData(
-                        alignment: BarChartAlignment.spaceAround,
-                        maxY: maxExpense,
-                        barTouchData: BarTouchData(
-                          enabled: true,
-                          touchTooltipData: BarTouchTooltipData(
-                            // Replace tooltipBackgroundColor with getTooltipColor
-                            getTooltipColor: (spot) => Colors.blueGrey,
-                            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                              return BarTooltipItem(
-                                currencyProvider.format(rod.toY),
-                                const TextStyle(color: Colors.white),
-                              );
-                            },
-                          ),
-                        ),
-                        titlesData: FlTitlesData(
-                          show: true,
-                          bottomTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              getTitlesWidget: (value, meta) {
-                                if (value < 0 || value >= _weekLabels.length) {
-                                  return const Text('');
-                                }
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(
-                                    _weekLabels[value.toInt()],
-                                    style: const TextStyle(fontSize: 10),
-                                  ),
+                  : Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: BarChart(
+                        BarChartData(
+                          alignment: BarChartAlignment.spaceAround,
+                          maxY: maxExpense,
+                          barTouchData: BarTouchData(
+                            enabled: true,
+                            touchTooltipData: BarTouchTooltipData(
+                              getTooltipColor: (spot) => Colors.blueGrey,
+                              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                                return BarTooltipItem(
+                                  currencyProvider.format(rod.toY),
+                                  const TextStyle(color: Colors.white),
                                 );
                               },
-                              reservedSize: 30,
                             ),
                           ),
-                          leftTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
-                          ),
-                          topTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
-                          ),
-                          rightTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
-                          ),
-                        ),
-                        borderData: FlBorderData(show: false),
-                        barGroups:
-                            _weeklyExpensesData[0].asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final value = entry.value;
-                          return BarChartGroupData(
-                            x: index,
-                            barRods: [
-                              BarChartRodData(
-                                toY: value,
-                                color: _getBarColor(context, index),
-                                width: 16,
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(4),
-                                  topRight: Radius.circular(4),
-                                ),
+                          titlesData: FlTitlesData(
+                            show: true,
+                            bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                getTitlesWidget: (value, meta) {
+                                  if (value < 0 || value >= _weekLabels.length) {
+                                    return const Text('');
+                                  }
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Text(
+                                      _weekLabels[value.toInt()],
+                                      style: const TextStyle(fontSize: 10),
+                                    ),
+                                  );
+                                },
+                                reservedSize: 35,
                               ),
-                            ],
-                          );
-                        }).toList(),
+                            ),
+                            leftTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false),
+                            ),
+                            topTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false),
+                            ),
+                            rightTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false),
+                            ),
+                          ),
+                          borderData: FlBorderData(show: false),
+                          barGroups:
+                              _weeklyExpensesData[0].asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final value = entry.value;
+                            return BarChartGroupData(
+                              x: index,
+                              barRods: [
+                                BarChartRodData(
+                                  toY: value,
+                                  color: _getBarColor(context, index),
+                                  width: 18,
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(4),
+                                    topRight: Radius.circular(4),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }).toList(),
+                        ),
                       ),
                     ),
             ),
