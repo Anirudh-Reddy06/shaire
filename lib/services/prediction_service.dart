@@ -43,7 +43,8 @@ class DailyPrediction {
 }
 
 class PredictionService {
-  static const String _baseUrl = 'https://shaire-backend.vercel.app';
+  static const String _baseUrl =
+      'https://shaire-backend-render-python.onrender.com';
 
   // Get predictions using simple average spending approach
   static Future<PredictionResponse> getPredictionsSimple(

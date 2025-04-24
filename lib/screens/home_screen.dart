@@ -5,7 +5,8 @@ import 'package:shaire/providers/expense_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/currency_provider.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // <-- Add this
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/logger_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,8 +15,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
+
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   late AnimationController _animationController;
   bool _isLoading = true;
   double _youGet = 0;
@@ -151,6 +154,28 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     return shouldExit ?? false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)! as PageRoute);
+  }
+
+  @override
+  void dispose() {
+    // Unsubscribe from the RouteObserver
+    routeObserver.unsubscribe(this);
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    super.didPopNext();
+    LoggerService.info(
+        "HomeScreen became visible again (didPopNext), fetching data...");
+    _fetchData();
   }
 
   Widget _buildRecentActivities(BuildContext context) {

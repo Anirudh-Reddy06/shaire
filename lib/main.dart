@@ -58,6 +58,7 @@ class MyApp extends StatelessWidget {
           themeMode: themeNotifier.themeMode,
           // home: const SplashScreen(), // Entry point is splash screen
           debugShowCheckedModeBanner: false,
+          navigatorObservers: [routeObserver],
           initialRoute: '/',
           routes: {
             '/': (context) => const SplashScreen(), // Root route for redirects
@@ -304,7 +305,7 @@ class _MainScreenState extends State<MainScreen> {
               MaterialPageRoute(builder: (context) => const AddExpenseScreen()))
           .then((_) {
         // Refresh expenses data when returning from the add expense screen
-        if (_selectedIndex == 3 || _selectedIndex == 3) {
+        if (_selectedIndex == 3) {
           // Expenses tab
           Provider.of<ExpenseProvider>(context, listen: false).fetchExpenses();
         }

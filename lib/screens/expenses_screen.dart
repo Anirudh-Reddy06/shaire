@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import '../database/expense.dart';
 import '../providers/expense_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:shaire/services/logger_service.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({super.key});
@@ -59,10 +60,57 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         await predictionProvider.fetchPredictions(expenseProvider.expenses);
       }
 
+      if (!predictionProvider.hasError &&
+          predictionProvider.futurePredictions.isNotEmpty) {
+        final now = DateTime.now();
+        // Calculate the start date of the next week (assuming Monday is start)
+        final daysUntilNextMonday = 8 - now.weekday;
+        final startOfNextWeek =
+            DateTime(now.year, now.month, now.day + daysUntilNextMonday);
+        final startOfWeekAfterNext =
+            startOfNextWeek.add(const Duration(days: 7));
+        final startOfTwoWeeksAfterNext =
+            startOfWeekAfterNext.add(const Duration(days: 7));
+
+        double nextWeekPredictedTotal = 0;
+        double weekAfterNextPredictedTotal = 0;
+
+        for (final prediction in predictionProvider.futurePredictions) {
+          final predictionDate = prediction.date;
+          // Check if prediction falls within the next week
+          if (!predictionDate.isBefore(startOfNextWeek) &&
+              predictionDate.isBefore(startOfWeekAfterNext)) {
+            nextWeekPredictedTotal += prediction.predictedAmount;
+          }
+          // Check if prediction falls within the week after next
+          else if (!predictionDate.isBefore(startOfWeekAfterNext) &&
+              predictionDate.isBefore(startOfTwoWeeksAfterNext)) {
+            weekAfterNextPredictedTotal += prediction.predictedAmount;
+          }
+        }
+
+        // Ensure _weeklyExpensesData has the list and it's long enough
+        if (_weeklyExpensesData.isNotEmpty &&
+            _weeklyExpensesData[0].length >= 7) {
+          _weeklyExpensesData[0][5] =
+              nextWeekPredictedTotal; // Index 5 is "In 1w"
+          _weeklyExpensesData[0][6] =
+              weekAfterNextPredictedTotal; // Index 6 is "In 2w"
+          LoggerService.debug(
+              'Updated weekly data with predictions: ${_weeklyExpensesData[0]}');
+        } else {
+          LoggerService.warning(
+              'Weekly expenses data structure issue, cannot add predictions.');
+        }
+      }
+
       setState(() => _isLoading = false);
     } catch (e) {
-      print('Error fetching expenses: $e');
-      setState(() => _isLoading = false);
+      LoggerService.error(
+          'Error fetching expenses or processing predictions', e);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -80,8 +128,48 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       // Force refresh of predictions
       await predictionProvider.fetchPredictions(expenseProvider.expenses,
           forceRefresh: true);
+
+      if (!predictionProvider.hasError &&
+          predictionProvider.futurePredictions.isNotEmpty) {
+        final now = DateTime.now();
+        final daysUntilNextMonday = 8 - now.weekday;
+        final startOfNextWeek =
+            DateTime(now.year, now.month, now.day + daysUntilNextMonday);
+        final startOfWeekAfterNext =
+            startOfNextWeek.add(const Duration(days: 7));
+        final startOfTwoWeeksAfterNext =
+            startOfWeekAfterNext.add(const Duration(days: 7));
+
+        double nextWeekPredictedTotal = 0;
+        double weekAfterNextPredictedTotal = 0;
+
+        for (final prediction in predictionProvider.futurePredictions) {
+          final predictionDate = prediction.date;
+          if (!predictionDate.isBefore(startOfNextWeek) &&
+              predictionDate.isBefore(startOfWeekAfterNext)) {
+            nextWeekPredictedTotal += prediction.predictedAmount;
+          } else if (!predictionDate.isBefore(startOfWeekAfterNext) &&
+              predictionDate.isBefore(startOfTwoWeeksAfterNext)) {
+            weekAfterNextPredictedTotal += prediction.predictedAmount;
+          }
+        }
+
+        if (_weeklyExpensesData.isNotEmpty &&
+            _weeklyExpensesData[0].length >= 7) {
+          _weeklyExpensesData[0][5] = nextWeekPredictedTotal;
+          _weeklyExpensesData[0][6] = weekAfterNextPredictedTotal;
+          LoggerService.debug(
+              'Updated weekly data with predictions on refresh: ${_weeklyExpensesData[0]}');
+        } else {
+          LoggerService.warning(
+              'Weekly expenses data structure issue on refresh, cannot add predictions.');
+        }
+      }
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
-      print('Error refreshing data: $e');
+      LoggerService.error('Error refreshing data', e);
     }
   }
 
@@ -429,8 +517,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (_weeklyExpensesData.isNotEmpty && _weeklyExpensesData[0].isNotEmpty) {
       maxExpense = _weeklyExpensesData[0]
           .reduce((max, value) => value > max ? value : max);
-      // Add some padding to max
-      maxExpense = maxExpense * 1.2;
+      maxExpense = maxExpense > 0 ? maxExpense * 1.2 : 50;
+    } else {
+      maxExpense = 50;
     }
 
     return Card(
