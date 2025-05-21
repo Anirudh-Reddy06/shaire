@@ -132,4 +132,18 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-\*Made with ❤️ by Team **VCRAM\***
+## 🛠️ Team Collaboration
+
+This project was built as a collaborative effort by a small team. My specific contributions include:
+
+- **Designing and implementing the complete database structure** using Supabase with PostgreSQL.
+- **Integrating the database** into the Flutter application using Supabase’s APIs.
+- Developing the following key **frontend screens**:
+  - `ExpensesScreen`
+  - `FriendDetailsScreen`
+  - `GroupsScreen`
+  - `GroupDetailsScreen`
+  - `EditProfileScreen`
+- Additionally, I made several smaller improvements and fixes across various parts of the codebase as needed.
+
+This project reflects strong collaboration, practical problem-solving, and real-world implementation of modern app development tools and architecture.
