@@ -72,7 +72,19 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _signUp() async {
-    if (_passwordController.text != _confirmPasswordController.text) {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+    final username = _usernameController.text.trim();
+
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address')),
+      );
+      return;
+    }
+
+    if (password != confirmPassword) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passwords do not match!')),
       );
@@ -82,24 +94,78 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = true);
     try {
       final response = await Supabase.instance.client.auth.signUp(
-        email: _emailController.text,
-        password: _passwordController.text,
-        data: {'username': _usernameController.text},
+        email: email,
+        password: password,
+        data: {'username': username},
       );
+
+      // When Supabase email confirmations are enabled and the email is already registered,
+      // Supabase returns a user with an empty identities list [].
+      final identities = response.user?.identities;
+      if (response.user != null && (identities == null || identities.isEmpty)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'This email is already registered. Please sign in instead.'),
+              backgroundColor: Colors.orange.shade800,
+              action: SnackBarAction(
+                label: 'Sign In',
+                textColor: Colors.white,
+                onPressed: () {
+                  setState(() => _isSignUp = false);
+                },
+              ),
+            ),
+          );
+        }
+        return;
+      }
 
       if (response.user != null && mounted) {
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => VerificationScreen(
-              email: _emailController.text,
+              email: email,
             ),
+          ),
+        );
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        final message = e.message.toLowerCase();
+        final isAlreadyRegistered = message.contains('already registered') ||
+            message.contains('already exists') ||
+            e.code == 'user_already_exists';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isAlreadyRegistered
+                  ? 'This email is already registered. Please sign in instead.'
+                  : e.message,
+            ),
+            backgroundColor:
+                isAlreadyRegistered ? Colors.orange.shade800 : Colors.red,
+            action: isAlreadyRegistered
+                ? SnackBarAction(
+                    label: 'Sign In',
+                    textColor: Colors.white,
+                    onPressed: () {
+                      setState(() => _isSignUp = false);
+                    },
+                  )
+                : null,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {

@@ -608,6 +608,9 @@ class _FriendDetailsScreenState extends State<FriendDetailsScreen>
         onPressed: _openQuickExpense,
         backgroundColor: primaryColor,
         foregroundColor: onPrimaryColor,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
         icon: const Icon(Icons.bolt),
         label: const Text('Quick Expense'),
       ),

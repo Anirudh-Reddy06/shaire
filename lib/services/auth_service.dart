@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/user_provider.dart';
@@ -33,7 +34,10 @@ class AuthService {
 
   /// Sends a password reset email using Supabase Auth.
   Future<void> sendPasswordResetEmail(String email) async {
-    await supabase.auth.resetPasswordForEmail(email.trim());
+    await supabase.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: kIsWeb ? null : 'io.supabase.shaire://reset-password/',
+    );
   }
 
   /// Verifies an OTP recovery code and sets a new password.

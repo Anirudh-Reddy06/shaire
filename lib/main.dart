@@ -22,16 +22,24 @@ import 'services/logger_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  const supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://jdopfszmrrcdghgaowme.supabase.co',
+  );
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  if (supabaseAnonKey.isEmpty) {
+    throw StateError(
+      'SUPABASE_ANON_KEY is not defined. '
+      'Please ensure you have configured your .env file and run with '
+      '--dart-define-from-file=.env',
+    );
+  }
+
   await Supabase.initialize(
-    url: const String.fromEnvironment(
-      'SUPABASE_URL',
-      defaultValue: 'https://jdopfszmrrcdghgaowme.supabase.co',
-    ),
-    anonKey: const String.fromEnvironment(
-      'SUPABASE_ANON_KEY',
-      defaultValue:
-          'eyJhbGciOi...',    
-    ),
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
   );
 
   runApp(

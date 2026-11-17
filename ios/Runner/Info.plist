@@ -49,5 +49,16 @@
 	<string>This app needs camera access to scan receipts</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs photo library access to get images of receipts</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>io.supabase.shaire</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

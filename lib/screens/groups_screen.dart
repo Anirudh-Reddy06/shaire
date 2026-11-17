@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/currency_provider.dart';
 import '../providers/friend_provider.dart'; // <-- Import
@@ -213,7 +214,14 @@ class _GroupsScreenState extends State<GroupsScreen>
                         return Card(
                           margin: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 4),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          clipBehavior: Clip.antiAlias,
                           child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             leading: CircleAvatar(
                               backgroundColor:
                                   Theme.of(context).colorScheme.secondary,
@@ -310,7 +318,14 @@ class _GroupsScreenState extends State<GroupsScreen>
                         return Card(
                           margin: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 4),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          clipBehavior: Clip.antiAlias,
                           child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             leading: CircleAvatar(
                               backgroundColor:
                                   primaryColor.withAlpha((0.8 * 255).round()),
@@ -374,6 +389,7 @@ class _GroupsScreenState extends State<GroupsScreen>
                               });
                             },
                             onLongPress: () {
+                              HapticFeedback.lightImpact();
                               FriendQuickActionModal.show(
                                 context,
                                 friend: item,
@@ -442,7 +458,14 @@ class _GroupsScreenState extends State<GroupsScreen>
                       return Card(
                         margin: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        clipBehavior: Clip.antiAlias,
                         child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                           leading: CircleAvatar(
                             // --- FIX: Replace withOpacity with withAlpha ---
                             backgroundColor:

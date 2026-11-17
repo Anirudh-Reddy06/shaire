@@ -91,12 +91,16 @@ cd shaire
 flutter pub get
 ```
 
-3. Configure environment variables for Supabase and Gemini API
+3. Configure environment variables:
+   Copy `.env.example` to `.env` and fill in your keys:
+   ```bash
+   cp .env.example .env
+   ```
 
 4. Run the app:
 
 ```bash
-flutter run
+flutter run --dart-define-from-file=.env
 ```
 
 ## Database Setup
