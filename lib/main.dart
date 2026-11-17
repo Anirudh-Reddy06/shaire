@@ -18,13 +18,28 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'screens/auth_screen.dart';
 import 'screens/complete_profile_screen.dart';
 import 'providers/friend_provider.dart';
+import 'services/logger_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  const supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://jdopfszmrrcdghgaowme.supabase.co',
+  );
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  if (supabaseAnonKey.isEmpty) {
+    throw StateError(
+      'SUPABASE_ANON_KEY is not defined. '
+      'Please ensure you have configured your .env file and run with '
+      '--dart-define-from-file=.env',
+    );
+  }
+
   await Supabase.initialize(
-    url: 'https://jdopfszmrrcdghgaowme.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impkb3Bmc3ptcnJjZGdoZ2Fvd21lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ0MTk1MzgsImV4cCI6MjA1OTk5NTUzOH0.hyuNiGoVf3nKFOYAlzU6iVeFZmVp2u6fjnjqcbFdTjI',
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
   );
 
   runApp(
@@ -145,7 +160,7 @@ class _SplashScreenState extends State<SplashScreen> {
         }
       } catch (e) {
         // Handle error fetching profile (e.g., show error message or go to login)
-        print("Error fetching profile in SplashScreen: $e");
+        LoggerService.error("Error fetching profile in SplashScreen: $e");
         if (mounted) {
           // Option: Go to login on error
           Navigator.of(context).pushNamedAndRemoveUntil(
@@ -200,69 +215,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-/* class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key, required this.isSignUp});
-
-  final bool isSignUp;
-
-  @override
-  State<AuthScreen> createState() => _AuthScreenState();
-} */
-
-/* class _AuthScreenState extends State<AuthScreen> {
-// For sign-up
-// For sign-up
-  // Track sign-up mode in state
-
-  @override
-  void initState() {
-    super.initState();
-// Initialize from widget property
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primaryColor = Theme.of(context).colorScheme.primary;
-
-    // Update the build method to use _isSignUp instead of widget.isSignUp
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Spacer(),
-            // Logo in center - match size with landing page
-            SvgPicture.asset(
-              'assets/images/logo.svg',
-              height: 160,
-              width: 160,
-            ),
-            const SizedBox(height: 24),
-            // "Shaire" text logo - match size with landing page
-            SvgPicture.asset(
-              'assets/images/logo_text.svg',
-              height: 50,
-              colorFilter: ColorFilter.mode(
-                primaryColor,
-                BlendMode.srcIn,
-              ),
-            ),
-            const Spacer(),
-            // Loader at the bottom
-            Padding(
-              padding: const EdgeInsets.only(bottom: 80.0),
-              child: CircularProgressIndicator(
-                color: primaryColor,
-                strokeWidth: 3,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-} */
-
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -305,7 +257,7 @@ class _MainScreenState extends State<MainScreen> {
               MaterialPageRoute(builder: (context) => const AddExpenseScreen()))
           .then((_) {
         // Refresh expenses data when returning from the add expense screen
-        if (_selectedIndex == 3) {
+        if (mounted && _selectedIndex == 3) {
           // Expenses tab
           Provider.of<ExpenseProvider>(context, listen: false).fetchExpenses();
         }
@@ -378,7 +330,10 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ],
             ),
-      body: _screens[_selectedIndex == 2 ? 0 : _selectedIndex],
+      body: IndexedStack(
+        index: _selectedIndex == 2 ? 0 : _selectedIndex,
+        children: _screens,
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _onItemTapped(2),
         tooltip: 'Add Expense',

@@ -1,66 +1,100 @@
 import 'package:flutter/material.dart';
-import 'package:logger/logger.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../database/payment.dart';
+import '../services/logger_service.dart';
+import '../services/custom_friend_balance_service.dart';
 
 class FriendProvider with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
-  final Logger _logger = Logger(
-    printer: PrettyPrinter(
-      methodCount: 0,
-      errorMethodCount: 5,
-      lineLength: 50,
-      colors: true,
-      printEmojis: true,
-      printTime: true,
-    ),
-  );
 
   List<Map<String, dynamic>> _friends = [];
   List<Map<String, dynamic>> _pendingReceived = [];
   List<Map<String, dynamic>> _pendingSent = [];
+  final Map<String, Map<String, double>> _friendBalances = {};
   bool _isLoading = false;
+  bool _hasFetched = false;
   String? _error;
 
   List<Map<String, dynamic>> get friends => _friends;
   List<Map<String, dynamic>> get pendingReceived => _pendingReceived;
   List<Map<String, dynamic>> get pendingSent => _pendingSent;
-  bool get isLoading => _isLoading;
+  Map<String, Map<String, double>> get friendBalances => _friendBalances;
+  bool get isLoading => _isLoading || !_hasFetched;
   String? get error => _error;
 
   String? get currentUserId => _supabase.auth.currentUser?.id;
 
   Future<Map<String, double>> getFriendBalance(String friendId) async {
-  final expensesRes = await _supabase.rpc(
-    'get_shared_expenses',
-    params: {
-      'p_current_user_id': currentUserId,
-      'p_friend_id': friendId,
-    },
-  );
-  double youOwe = 0.0, youAreOwed = 0.0;
-  for (final e in expensesRes) {
-    final yourShare = e['your_share'] as num? ?? 0;
-    final youPaid = e['you_paid'] as num? ?? 0;
-    if (yourShare > youPaid) {
-      youOwe += yourShare - youPaid;
-    } else if (yourShare < youPaid) {
-      youAreOwed += youPaid - yourShare;
+    if (currentUserId == null) return {'youOwe': 0.0, 'youAreOwed': 0.0};
+
+    try {
+      final expensesRes = await _supabase.rpc(
+        'get_shared_expenses',
+        params: {
+          'p_current_user_id': currentUserId,
+          'p_friend_id': friendId,
+        },
+      );
+
+      final paymentsRes = await PaymentService()
+          .fetchPaymentsBetweenUsers(currentUserId!, friendId);
+
+      double expensesYouOwe = 0.0;
+      double expensesYouAreOwed = 0.0;
+
+      for (final e in expensesRes) {
+        final amount = (e['total_amount'] as num).toDouble();
+        final yourShare = (e['your_share'] as num? ?? 0).toDouble();
+        final friendShare = (e['friend_share'] as num?)?.toDouble() ??
+            (amount > yourShare ? amount - yourShare : 0.0);
+        final youPaid = (e['you_paid'] as num? ?? 0).toDouble();
+        final friendPaid = (e['friend_paid'] as num? ?? 0).toDouble();
+
+        if (youPaid > 0 && friendShare > 0) {
+          final coverage = amount > 0 ? (youPaid / amount).clamp(0.0, 1.0) : 1.0;
+          expensesYouAreOwed += friendShare * coverage;
+        }
+        if (friendPaid > 0 && yourShare > 0) {
+          final coverage = amount > 0 ? (friendPaid / amount).clamp(0.0, 1.0) : 1.0;
+          expensesYouOwe += yourShare * coverage;
+        }
+      }
+
+      double paidToFriend = 0.0;
+      double receivedFromFriend = 0.0;
+      for (final p in paymentsRes) {
+        final amt = (p['amount'] as num).toDouble();
+        if (p['from_user_id'] == currentUserId) {
+          paidToFriend += amt;
+        } else {
+          receivedFromFriend += amt;
+        }
+      }
+
+      final net = (expensesYouAreOwed - expensesYouOwe) + (paidToFriend - receivedFromFriend);
+      final bal = {
+        'youOwe': net < 0 ? net.abs() : 0.0,
+        'youAreOwed': net > 0 ? net : 0.0,
+      };
+      _friendBalances[friendId] = bal;
+      return bal;
+    } catch (e) {
+      LoggerService.error('Error getting friend balance', e);
+      final fallback = {'youOwe': 0.0, 'youAreOwed': 0.0};
+      _friendBalances[friendId] = fallback;
+      return fallback;
     }
   }
-  return {'youOwe': youOwe, 'youAreOwed': youAreOwed};
-}
 
   Future<void> fetchFriendsAndRequests() async {
     if (currentUserId == null) return;
 
     _isLoading = true;
     _error = null;
-    // Consider removing immediate notifyListeners if it causes build errors
-    // notifyListeners();
+    notifyListeners();
 
     try {
-      // --- Fetch Accepted Friends ---
-      // Find friendships where status is 'accepted' and current user is involved
+      // --- Fetch Accepted Standard Friends ---
       final friendshipsRes = await _supabase
           .from('friendships')
           .select('id, user_id_1, user_id_2')
@@ -73,28 +107,59 @@ class FriendProvider with ChangeNotifier {
             : friendship['user_id_1'];
       }).toList();
 
+      List<Map<String, dynamic>> standardFriends = [];
       if (friendIds.isNotEmpty) {
-        // Fetch profile details for these friend IDs
         final friendsRes = await _supabase
             .from('profiles')
-            .select(
-                'id, username, full_name, avatar_url') // Add fields as needed
+            .select('id, username, full_name, avatar_url')
             .inFilter('id', friendIds);
-        _friends = friendsRes;
-      } else {
-        _friends = [];
+        standardFriends = List<Map<String, dynamic>>.from(friendsRes);
+      }
+
+      // --- Fetch Custom (Name-Only) Friends ---
+      List<Map<String, dynamic>> customFriends = [];
+      try {
+        final customRes = await _supabase
+            .from('custom_friends')
+            .select('id, name, linked_user_id')
+            .eq('user_id', currentUserId!);
+
+        customFriends = (customRes as List).map<Map<String, dynamic>>((c) => {
+          'id': c['id'].toString(),
+          'username': null,
+          'full_name': c['name'],
+          'avatar_url': null,
+          'is_custom': true,
+          'linked_user_id': c['linked_user_id']?.toString(),
+        }).toList();
+      } catch (e) {
+        LoggerService.warning('Custom friends table query: $e');
+      }
+
+      _friends = [...standardFriends, ...customFriends];
+
+      // --- Batch Pre-fetch Balances (Eliminates N+1 Queries) ---
+      if (friendIds.isNotEmpty) {
+        await Future.wait(friendIds.map((id) => getFriendBalance(id)));
+      }
+      for (final c in customFriends) {
+        final linkedId = c['linked_user_id'];
+        if (linkedId != null && _friendBalances.containsKey(linkedId)) {
+          _friendBalances[c['id']] = _friendBalances[linkedId]!;
+        } else {
+          _friendBalances[c['id']] =
+              await CustomFriendBalanceService.getBalance(c['id'].toString());
+        }
       }
 
       // --- Fetch Pending Received Requests ---
-      // Where current user is user_id_2 and status is 'pending'
       final pendingReceivedRes = await _supabase
           .from('friendships')
           .select(
-              'id, user_id_1, user_id_2, profiles!user_id_1(id, username, full_name, avatar_url)') // Fetch sender profile
+              'id, user_id_1, user_id_2, profiles!user_id_1(id, username, full_name, avatar_url)')
           .eq('user_id_2', currentUserId!)
           .eq('status', 'pending');
       _pendingReceived = pendingReceivedRes.map((req) {
-        // Restructure to include friendship ID and sender profile
         return {
           'friendship_id': req['id'],
           'sender_profile': req['profiles'],
@@ -102,26 +167,26 @@ class FriendProvider with ChangeNotifier {
       }).toList();
 
       // --- Fetch Pending Sent Requests ---
-      // Where current user is user_id_1 and status is 'pending'
       final pendingSentRes = await _supabase
           .from('friendships')
           .select(
-              'id, user_id_1, user_id_2, profiles!user_id_2(id, username, full_name, avatar_url)') // Fetch receiver profile
+              'id, user_id_1, user_id_2, profiles!user_id_2(id, username, full_name, avatar_url)')
           .eq('user_id_1', currentUserId!)
           .eq('status', 'pending');
       _pendingSent = pendingSentRes.map((req) {
-        // Restructure to include friendship ID and receiver profile
         return {
           'friendship_id': req['id'],
           'receiver_profile': req['profiles'],
         };
       }).toList();
 
+      _hasFetched = true;
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      _logger.e("Error fetching friends/requests", error: e);
+      LoggerService.error("Error fetching friends/requests", e);
       _error = "Failed to load friends data: ${e.toString()}";
+      _hasFetched = true;
       _isLoading = false;
       notifyListeners();
     }
@@ -179,7 +244,7 @@ class FriendProvider with ChangeNotifier {
       // 4. Refresh data
       await fetchFriendsAndRequests(); // This handles loading state and notifyListeners
     } catch (e) {
-      _logger.e("Error sending friend request", error: e);
+      LoggerService.error("Error sending friend request", e);
       _isLoading = false; // Ensure loading is reset on error
       notifyListeners();
       rethrow; // Re-throw the exception to be caught in the UI
@@ -190,7 +255,7 @@ class FriendProvider with ChangeNotifier {
     if (currentUserId == null) throw Exception("Not logged in");
 
     try {
-      _logger.i("Responding to $friendshipId (accept=$accept)");
+      LoggerService.info("Responding to $friendshipId (accept=$accept)");
       // find the pending request
       final idx = _pendingReceived
           .indexWhere((r) => r['friendship_id'] == friendshipId);
@@ -211,16 +276,338 @@ class FriendProvider with ChangeNotifier {
       }
 
       notifyListeners();
-      _logger.d("Notified listeners");
+      LoggerService.debug("Notified listeners");
 
       await Future.delayed(const Duration(milliseconds: 300));
       fetchFriendsAndRequests();
     } catch (e, st) {
-      _logger.e("Failed to respond", error: e, stackTrace: st);
+      LoggerService.error("Failed to respond", e, st);
       rethrow;
     }
   }
-}
 
-  // Add removeFriend method if needed
+  Future<Map<String, dynamic>> addCustomFriend(String name) async {
+    if (currentUserId == null) throw Exception("Not logged in");
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw Exception("Please enter a name");
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final res = await _supabase
+          .from('custom_friends')
+          .insert({
+            'user_id': currentUserId,
+            'name': trimmed,
+          })
+          .select()
+          .single();
+
+      final newFriend = {
+        'id': res['id'].toString(),
+        'name': trimmed,
+        'username': null,
+        'avatar_url': null,
+        'is_custom': true,
+        'linked_user_id': null,
+        'isGroup': false,
+      };
+
+      await fetchFriendsAndRequests();
+      return newFriend;
+    } catch (e) {
+      LoggerService.error("Error adding custom friend", e);
+      _isLoading = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> linkCustomFriend(
+      String customFriendId, String usernameOrEmail) async {
+    if (currentUserId == null) throw Exception("Not logged in");
+    final input = usernameOrEmail.trim();
+    if (input.isEmpty) throw Exception("Please enter username or email");
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      // 1. Find the target user's profile
+      final potentialUsers = await _supabase
+          .from('profiles')
+          .select('id, username, full_name')
+          .or('username.eq.$input,email.eq.$input')
+          .limit(1);
+
+      if (potentialUsers.isEmpty) {
+        throw Exception("No user found with username or email: $input");
+      }
+
+      final targetUserId = potentialUsers[0]['id'] as String;
+      if (targetUserId == currentUserId) {
+        throw Exception("You cannot link your own account");
+      }
+
+      // 2. Update custom_friends
+      await _supabase.from('custom_friends').update({
+        'linked_user_id': targetUserId,
+      }).eq('id', customFriendId);
+
+      // 3. Ensure friendship exists between users
+      final existingFriendship = await _supabase
+          .from('friendships')
+          .select('id, status')
+          .or('and(user_id_1.eq.$currentUserId,user_id_2.eq.$targetUserId),and(user_id_1.eq.$targetUserId,user_id_2.eq.$currentUserId)')
+          .maybeSingle();
+
+      if (existingFriendship == null) {
+        await _supabase.from('friendships').insert({
+          'user_id_1': currentUserId,
+          'user_id_2': targetUserId,
+          'status': 'accepted',
+        });
+      } else if (existingFriendship['status'] == 'pending') {
+        await _supabase.from('friendships').update({
+          'status': 'accepted',
+        }).eq('id', existingFriendship['id']);
+      }
+
+      await fetchFriendsAndRequests();
+    } catch (e) {
+      LoggerService.error("Error linking custom friend", e);
+      _isLoading = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteCustomFriend(String customFriendId) async {
+    if (currentUserId == null) throw Exception("Not logged in");
+    try {
+      await _supabase.from('custom_friends').delete().eq('id', customFriendId);
+      await fetchFriendsAndRequests();
+    } catch (e) {
+      LoggerService.error("Error deleting custom friend", e);
+      rethrow;
+    }
+  }
+
+  Future<void> deleteFriend(String friendId, {bool isCustom = false}) async {
+    if (currentUserId == null) throw Exception("Not logged in");
+    if (isCustom) {
+      await deleteCustomFriend(friendId);
+      return;
+    }
+    try {
+      await _supabase
+          .from('friendships')
+          .delete()
+          .or('and(user_id_1.eq.$currentUserId,user_id_2.eq.$friendId),and(user_id_1.eq.$friendId,user_id_2.eq.$currentUserId)');
+      await fetchFriendsAndRequests();
+    } catch (e) {
+      LoggerService.error("Error deleting friend", e);
+      rethrow;
+    }
+  }
+
+  Future<void> renameCustomFriend(String customFriendId, String newName) async {
+    if (currentUserId == null) throw Exception("Not logged in");
+    try {
+      await _supabase
+          .from('custom_friends')
+          .update({'name': newName.trim()})
+          .eq('id', customFriendId);
+      await fetchFriendsAndRequests();
+    } catch (e) {
+      LoggerService.error("Error renaming custom friend", e);
+      rethrow;
+    }
+  }
+
+  /// Fetch full friend profile, shared expenses, payments, and pairwise balances
+  Future<Map<String, dynamic>> fetchFriendDetailsAndSharedData(dynamic friendId) async {
+    final userId = currentUserId;
+    if (userId == null) throw Exception("Not logged in");
+
+    final friendIdStr = friendId.toString();
+    final isUuid = RegExp(
+            r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        .hasMatch(friendIdStr);
+
+    // 1. Fetch friend profile
+    Map<String, dynamic>? profile;
+    if (isUuid) {
+      try {
+        final profileRes = await _supabase
+            .from('profiles')
+            .select('full_name, username, avatar_url')
+            .eq('id', friendId)
+            .maybeSingle();
+
+        if (profileRes != null) {
+          profile = {
+            'id': friendIdStr,
+            'full_name': profileRes['full_name'],
+            'username': profileRes['username'],
+            'avatar_url': profileRes['avatar_url'],
+            'is_custom': false,
+            'linked_user_id': null,
+          };
+        }
+      } catch (e) {
+        LoggerService.warning('Error fetching profile for $friendId: $e');
+      }
+    }
+
+    if (profile == null) {
+      try {
+        final customRes = await _supabase
+            .from('custom_friends')
+            .select('id, name, linked_user_id')
+            .eq('id', friendId)
+            .maybeSingle();
+        if (customRes != null) {
+          profile = {
+            'id': customRes['id'].toString(),
+            'full_name': customRes['name'],
+            'username': null,
+            'avatar_url': null,
+            'is_custom': true,
+            'linked_user_id': customRes['linked_user_id']?.toString(),
+          };
+        }
+      } catch (e) {
+        LoggerService.warning('Error fetching custom friend for $friendId: $e');
+      }
+    }
+
+    // 2. Fetch shared expenses via RPC (only if not an unlinked custom friend)
+    final List<Map<String, dynamic>> expenses = [];
+    final List<Map<String, dynamic>> payments = [];
+    double expensesYouOwe = 0.0;
+    double expensesYouAreOwed = 0.0;
+    double paidToFriend = 0.0;
+    double receivedFromFriend = 0.0;
+
+    final isCustomUnlinked =
+        profile?['is_custom'] == true && profile?['linked_user_id'] == null;
+
+    if (!isCustomUnlinked) {
+      final targetUserId = profile?['linked_user_id'] ?? friendId;
+      try {
+        final expensesRes = await _supabase.rpc(
+          'get_shared_expenses',
+          params: {
+            'p_current_user_id': userId,
+            'p_friend_id': targetUserId,
+          },
+        );
+
+        if (expensesRes is List) {
+          for (final e in expensesRes) {
+            final amount = (e['total_amount'] as num).toDouble();
+            final yourShare = (e['your_share'] as num? ?? 0).toDouble();
+            final friendShare = (e['friend_share'] as num?)?.toDouble() ??
+                (amount > yourShare ? amount - yourShare : 0.0);
+            final youPaid = (e['you_paid'] as num? ?? 0).toDouble();
+            final friendPaid = (e['friend_paid'] as num? ?? 0).toDouble();
+
+            if (youPaid > 0 && friendShare > 0) {
+              final coverage =
+                  amount > 0 ? (youPaid / amount).clamp(0.0, 1.0) : 1.0;
+              expensesYouAreOwed += friendShare * coverage;
+            }
+            if (friendPaid > 0 && yourShare > 0) {
+              final coverage =
+                  amount > 0 ? (friendPaid / amount).clamp(0.0, 1.0) : 1.0;
+              expensesYouOwe += yourShare * coverage;
+            }
+
+            expenses.add({
+              'id': e['id'] as int,
+              'description': e['description'],
+              'amount': amount,
+              'date': DateTime.parse(e['date'] as String),
+              'creator_name': e['creator_name'],
+              'your_share': yourShare,
+              'you_paid': youPaid,
+              'friend_paid': friendPaid,
+            });
+          }
+        }
+      } catch (e) {
+        LoggerService.warning('Error fetching shared expenses via rpc: $e');
+      }
+
+      // 3. Fetch payments
+      try {
+        final paymentsRes = await PaymentService().fetchPaymentsBetweenUsers(
+          userId,
+          targetUserId.toString(),
+        );
+        for (final p in paymentsRes) {
+          final pAmt = (p['amount'] as num).toDouble();
+          if (p['from_user_id'] == userId) {
+            paidToFriend += pAmt;
+          } else {
+            receivedFromFriend += pAmt;
+          }
+          payments.add(Map<String, dynamic>.from(p));
+        }
+      } catch (e) {
+        LoggerService.warning('Error fetching payments between users: $e');
+      }
+    }
+
+    if (expenses.isEmpty) {
+      final customExpenses =
+          await CustomFriendBalanceService.getExpenses(friendIdStr);
+      final customBal =
+          await CustomFriendBalanceService.getBalance(friendIdStr);
+      expensesYouAreOwed += customBal['youAreOwed'] ?? 0.0;
+      expensesYouOwe += customBal['youOwe'] ?? 0.0;
+
+      for (final ce in customExpenses) {
+        expenses.add({
+          'id': ce['expense_id'] ?? 0,
+          'description': ce['description'] ?? 'Expense',
+          'amount': (ce['total_amount'] as num?)?.toDouble() ?? 0.0,
+          'date': ce['date'] != null
+              ? DateTime.tryParse(ce['date'] as String) ?? DateTime.now()
+              : DateTime.now(),
+          'creator_name': ce['paid_by_you'] == true
+              ? 'You'
+              : (profile?['full_name'] ?? 'Friend'),
+          'your_share': (ce['your_share'] as num?)?.toDouble() ?? 0.0,
+          'you_paid': ce['paid_by_you'] == true
+              ? (ce['total_amount'] as num?)?.toDouble() ?? 0.0
+              : 0.0,
+          'friend_paid': ce['paid_by_you'] != true
+              ? (ce['total_amount'] as num?)?.toDouble() ?? 0.0
+              : 0.0,
+        });
+      }
+    }
+
+    final net = (expensesYouAreOwed - expensesYouOwe) + (paidToFriend - receivedFromFriend);
+    final youAreOwed = net > 0 ? net : 0.0;
+    final youOwe = net < 0 ? net.abs() : 0.0;
+
+    _friendBalances[friendId.toString()] = {
+      'youOwe': youOwe,
+      'youAreOwed': youAreOwed,
+    };
+
+    return {
+      'profile': profile,
+      'expenses': expenses,
+      'payments': payments,
+      'netBalance': net,
+      'youAreOwed': youAreOwed,
+      'youOwe': youOwe,
+    };
+  }
+}
 

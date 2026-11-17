@@ -10,14 +10,29 @@ import '../services/bill_service.dart';
 import '../services/logger_service.dart';
 import '../providers/currency_provider.dart';
 import '../database/receipt.dart';
+import '../database/balance.dart';
 import 'package:provider/provider.dart';
+import '../providers/user_provider.dart';
 import 'package:image/image.dart' as img;
+import '../providers/friend_provider.dart';
+import '../providers/group_provider.dart';
+import '../widgets/split_options_widget.dart';
+import '../widgets/contact_selector_section.dart';
+import 'dart:async';
+import '../widgets/receipt_scanner_section.dart';
+import '../widgets/loading_spinner.dart';
+import '../services/pdf_service.dart';
+import '../services/expense_draft_service.dart';
+import '../services/custom_friend_balance_service.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:path_provider/path_provider.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   final int? groupId;
   final String? groupName;
   final dynamic friendId;
   final String? friendName;
+  final bool resumeDraft;
 
   const AddExpenseScreen({
     super.key,
@@ -25,6 +40,7 @@ class AddExpenseScreen extends StatefulWidget {
     this.groupName,
     this.friendId,
     this.friendName,
+    this.resumeDraft = false,
   });
 
   @override
@@ -32,7 +48,7 @@ class AddExpenseScreen extends StatefulWidget {
 }
 
 class _AddExpenseScreenState extends State<AddExpenseScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   // Form key for validation
   final _formKey = GlobalKey<FormState>();
 
@@ -75,20 +91,612 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
   // Loading state
   bool _isLoading = false;
+  String _loadingMessage = 'Saving expense & updating balances...';
 
   // Services
   final BillService _billService = BillService();
   final ReceiptService _receiptService = ReceiptService();
   int? _currentReceiptId;
+  File? _receiptImageFile;
+
+  Timer? _debounceTimer;
+  String _payerId = 'you';
+  String _payerName = 'You';
+  bool _isMultiplePayers = false;
+  Map<String, double> _payerAmounts = {};
+  bool _isDiscardedOrSaved = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _saveCurrentDraft();
+    }
+  }
+
+  void _scheduleAutoSave() {
+    if (_isDiscardedOrSaved) return;
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _saveCurrentDraft();
+    });
+  }
+
+  bool get _hasMeaningfulContent {
+    if (_isDiscardedOrSaved) return false;
+    if (_descriptionController.text.trim().isNotEmpty) return true;
+    final amt = double.tryParse(_totalAmountController.text) ?? 0;
+    if (amt > 0) return true;
+    if (_billEntries.isNotEmpty) return true;
+    if (_receiptImageFile != null) return true;
+    if (_isMultiplePayers && _payerAmounts.values.any((v) => v > 0)) return true;
+
+    final int prefilledCount =
+        (widget.groupId != null ? 1 : 0) + (widget.friendId != null ? 1 : 0);
+    if (_selectedContactsData.length > prefilledCount) return true;
+
+    return false;
+  }
+
+  Future<void> _saveCurrentDraft() async {
+    if (_isDiscardedOrSaved) return;
+    if (!_hasMeaningfulContent) {
+      await ExpenseDraftService.clearDraft();
+      return;
+    }
+
+    final draft = ExpenseDraft(
+      description: _descriptionController.text,
+      totalAmount: double.tryParse(_totalAmountController.text),
+      category: _selectedCategory,
+      date: _selectedDate,
+      splitType: _getSplitTypeString(_splitType),
+      selectedContacts: _selectedContactsData,
+      individualAmounts:
+          _individualAmountControllers.map((k, v) => MapEntry(k, v.text)),
+      individualPercents:
+          _individualPercentControllers.map((k, v) => MapEntry(k, v.text)),
+      billEntries: _billEntries,
+      receiptImagePath: _receiptImageFile?.path,
+      currentReceiptId: _currentReceiptId,
+      groupId: widget.groupId,
+      groupName: widget.groupName,
+      friendId: widget.friendId,
+      friendName: widget.friendName,
+      payerId: _payerId,
+      payerName: _payerName,
+      isMultiplePayers: _isMultiplePayers,
+      payerAmounts: _payerAmounts,
+    );
+    await ExpenseDraftService.saveDraft(draft);
+  }
+
+  Future<void> _checkAndLoadDraft() async {
+    if (widget.resumeDraft) {
+      await _loadDraftFromStorage();
+    } else if (widget.groupId == null && widget.friendId == null) {
+      final draft = await ExpenseDraftService.getDraft();
+      if (draft != null && draft.hasContent) {
+        await _applyDraft(draft);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Resumed unfinished expense draft'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadDraftFromStorage() async {
+    final draft = await ExpenseDraftService.getDraft();
+    if (draft != null && mounted) {
+      await _applyDraft(draft);
+    }
+  }
+
+  Future<void> _applyDraft(ExpenseDraft draft) async {
+    setState(() {
+      _descriptionController.text = draft.description;
+      if (draft.totalAmount != null && draft.totalAmount! > 0) {
+        _totalAmountController.text = draft.totalAmount!.toStringAsFixed(2);
+      }
+      _selectedCategory = draft.category;
+      _selectedDate = draft.date;
+      _payerId = draft.payerId;
+      _payerName = draft.payerName;
+      _isMultiplePayers = draft.isMultiplePayers;
+      _payerAmounts = Map<String, double>.from(draft.payerAmounts);
+
+      if (draft.splitType == 'exact' || draft.splitType == 'manual') {
+        _splitType = SplitType.manual;
+        _tabController.index = 1;
+      } else if (draft.splitType == 'percentage') {
+        _splitType = SplitType.percentage;
+        _tabController.index = 2;
+      } else {
+        _splitType = SplitType.equal;
+        _tabController.index = 0;
+      }
+
+      _selectedContactsData.clear();
+      for (final c in draft.selectedContacts) {
+        _selectedContactsData.add(c);
+        final id = c['id'].toString();
+        _individualAmountControllers[id] = TextEditingController(
+          text: draft.individualAmounts[id] ?? '0.00',
+        );
+        _individualPercentControllers[id] = TextEditingController(
+          text: draft.individualPercents[id] ?? '0',
+        );
+      }
+
+      if (draft.individualAmounts.containsKey('you')) {
+        _individualAmountControllers['you'] = TextEditingController(
+          text: draft.individualAmounts['you'] ?? '',
+        );
+      }
+      if (draft.individualPercents.containsKey('you')) {
+        _individualPercentControllers['you'] = TextEditingController(
+          text: draft.individualPercents['you'] ?? '0',
+        );
+      }
+
+      _billEntries.clear();
+      _billEntries.addAll(draft.billEntries);
+
+      if (draft.receiptImagePath != null) {
+        final f = File(draft.receiptImagePath!);
+        if (f.existsSync()) {
+          _receiptImageFile = f;
+        }
+      }
+      _currentReceiptId = draft.currentReceiptId;
+    });
+
+    _updateSplitAmounts();
+  }
+
+  String _getCurrentUserName() {
+    try {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      final fullName = userProvider.userData?['full_name'] as String?;
+      if (fullName != null && fullName.trim().isNotEmpty) {
+        return fullName.trim();
+      }
+      final username = userProvider.userData?['username'] as String?;
+      if (username != null && username.trim().isNotEmpty) {
+        return username.trim();
+      }
+    } catch (_) {}
+
+    final user = _supabase.auth.currentUser;
+    final metaName = user?.userMetadata?['full_name'] as String? ??
+        user?.userMetadata?['name'] as String?;
+    if (metaName != null && metaName.trim().isNotEmpty) {
+      return metaName.trim();
+    }
+    if (user?.email != null && user!.email!.isNotEmpty) {
+      return user.email!.split('@').first;
+    }
+    return 'User';
+  }
+
+  Future<bool?> _showDiscardDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard Expense?'),
+        content: const Text(
+          'You have unsaved changes. Are you sure you want to discard this expense?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep Editing'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _payerSummaryText {
+    if (!_isMultiplePayers) {
+      return _payerName;
+    }
+    final payersWithAmount = _payerAmounts.entries
+        .where((e) => e.value > 0.01)
+        .toList();
+    if (payersWithAmount.isEmpty) {
+      return 'Multiple people';
+    } else if (payersWithAmount.length == 1) {
+      return _getPayerNameById(payersWithAmount.first.key);
+    } else if (payersWithAmount.length == 2) {
+      final name1 = _getPayerNameById(payersWithAmount[0].key);
+      final name2 = _getPayerNameById(payersWithAmount[1].key);
+      return '$name1 & $name2';
+    } else {
+      return '${payersWithAmount.length} people';
+    }
+  }
+
+  String _getPayerNameById(String id) {
+    if (id == 'you') return 'You';
+    final contact = _selectedContactsData.firstWhere(
+      (c) => c['id'].toString() == id,
+      orElse: () => {'name': 'Friend'},
+    );
+    return contact['name'] as String? ?? 'Friend';
+  }
+
+  void _showPayerSelectionDialog() {
+    final List<Map<String, dynamic>> payerOptions = [
+      {'id': 'you', 'name': 'You (Current User)'},
+      ..._selectedContactsData.where((c) => c['isGroup'] != true),
+    ];
+
+    bool tempIsMultiple = _isMultiplePayers;
+    String tempPayerId = _payerId;
+    final Map<String, double> tempPayerAmounts =
+        Map<String, double>.from(_payerAmounts);
+    final Map<String, TextEditingController> amountControllers = {};
+
+    for (final opt in payerOptions) {
+      final id = opt['id'].toString();
+      final val = tempPayerAmounts[id];
+      amountControllers[id] = TextEditingController(
+        text: (val != null && val > 0) ? val.toStringAsFixed(2) : '',
+      );
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final theme = Theme.of(context);
+          final colorScheme = theme.colorScheme;
+          final currencyProvider =
+              Provider.of<CurrencyProvider>(context, listen: false);
+          final currencySymbol = currencyProvider.currencySymbol;
+          final currentBill =
+              double.tryParse(_totalAmountController.text) ?? 0.0;
+          final currentPaid =
+              tempPayerAmounts.values.fold(0.0, (sum, val) => sum + val);
+          final diff = currentBill - currentPaid;
+          final bool isBalanced = currentBill > 0 && diff.abs() < 0.01;
+
+          return AlertDialog(
+            title: const Text('Who paid for this expense?'),
+            contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Mode switcher
+                    Center(
+                      child: SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: Text('Single Person'),
+                            icon: Icon(Icons.person_outline, size: 18),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: Text('Multiple People'),
+                            icon: Icon(Icons.group_outlined, size: 18),
+                          ),
+                        ],
+                        selected: {tempIsMultiple},
+                        onSelectionChanged: (newSelection) {
+                          setDialogState(() {
+                            tempIsMultiple = newSelection.first;
+                            if (tempIsMultiple && tempPayerAmounts.isEmpty) {
+                              if (currentBill > 0) {
+                                tempPayerAmounts[tempPayerId] = currentBill;
+                                amountControllers[tempPayerId]?.text =
+                                    currentBill.toStringAsFixed(2);
+                              }
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    if (!tempIsMultiple) ...[
+                      // Single person list
+                      ...payerOptions.map((option) {
+                        final optionId = option['id'].toString();
+                        final isSelected = tempPayerId == optionId;
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          leading: CircleAvatar(
+                            backgroundColor: isSelected
+                                ? colorScheme.primaryContainer
+                                : colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              optionId == 'you' ? Icons.person : Icons.face,
+                              color: isSelected
+                                  ? colorScheme.onPrimaryContainer
+                                  : colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          title: Text(
+                            option['name'] as String,
+                            style: TextStyle(
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: isSelected
+                              ? Icon(Icons.check_circle,
+                                  color: colorScheme.primary)
+                              : null,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          onTap: () {
+                            setState(() {
+                              _isMultiplePayers = false;
+                              _payerId = optionId;
+                              _payerName = optionId == 'you'
+                                  ? 'You'
+                                  : (option['name'] as String);
+                            });
+                            Navigator.pop(ctx);
+                            _scheduleAutoSave();
+                          },
+                        );
+                      }),
+                    ] else ...[
+                      // Multiple people mode
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Total Bill: ${currencyProvider.format(currentBill)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  'Total Paid: ${currencyProvider.format(currentPaid)}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: isBalanced
+                                        ? Colors.green
+                                        : (diff > 0.01
+                                            ? Colors.orange
+                                            : Colors.red),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isBalanced
+                                        ? Colors.green.withValues(alpha: 0.15)
+                                        : (diff > 0.01
+                                            ? Colors.orange.withValues(alpha: 0.15)
+                                            : Colors.red.withValues(alpha: 0.15)),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    currentBill <= 0
+                                        ? 'Enter bill amount'
+                                        : isBalanced
+                                            ? 'Amounts match ✓'
+                                            : diff > 0.01
+                                                ? '${currencyProvider.format(diff)} remaining'
+                                                : 'Exceeds by ${currencyProvider.format(-diff)}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isBalanced
+                                          ? Colors.green
+                                          : (diff > 0.01
+                                              ? Colors.orange.shade800
+                                              : Colors.red),
+                                    ),
+                                  ),
+                                ),
+                                if (currentBill > 0)
+                                  TextButton.icon(
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        final perPerson = payerOptions.isNotEmpty
+                                            ? (currentBill / payerOptions.length)
+                                            : 0.0;
+                                        for (final opt in payerOptions) {
+                                          final id = opt['id'].toString();
+                                          tempPayerAmounts[id] = perPerson;
+                                          amountControllers[id]?.text = perPerson > 0
+                                              ? perPerson.toStringAsFixed(2)
+                                              : '';
+                                        }
+                                      });
+                                    },
+                                    icon: const Icon(Icons.pie_chart_outline,
+                                        size: 14),
+                                    label: const Text('Split equally',
+                                        style: TextStyle(fontSize: 11)),
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      ...payerOptions.map((option) {
+                        final optionId = option['id'].toString();
+                        final name = optionId == 'you'
+                            ? 'You'
+                            : (option['name'] as String);
+                        final controller = amountControllers[optionId] ??
+                            TextEditingController();
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4.0),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 16,
+                                backgroundColor:
+                                    colorScheme.surfaceContainerHighest,
+                                child: Icon(
+                                  optionId == 'you' ? Icons.person : Icons.face,
+                                  size: 16,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w500),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 110,
+                                height: 40,
+                                child: TextField(
+                                  controller: controller,
+                                  keyboardType: const TextInputType
+                                      .numberWithOptions(decimal: true),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d+\.?\d{0,2}')),
+                                  ],
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontSize: 14),
+                                  decoration: InputDecoration(
+                                    prefixText: currencySymbol,
+                                    prefixStyle: TextStyle(
+                                      fontSize: 14,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    hintText: '0.00',
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 8),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide:
+                                          BorderSide(color: theme.dividerColor),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide:
+                                          BorderSide(color: theme.dividerColor),
+                                    ),
+                                  ),
+                                  onChanged: (val) {
+                                    setDialogState(() {
+                                      final parsed =
+                                          double.tryParse(val) ?? 0.0;
+                                      tempPayerAmounts[optionId] = parsed;
+                                    });
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              if (tempIsMultiple)
+                ElevatedButton(
+                  onPressed: () {
+                    if (currentBill > 0 &&
+                        (currentPaid - currentBill).abs() > 0.05) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Total paid (${currencyProvider.format(currentPaid)}) must match bill amount (${currencyProvider.format(currentBill)})',
+                          ),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                      return;
+                    }
+                    if (currentBill == 0 && currentPaid > 0) {
+                      _totalAmountController.text =
+                          currentPaid.toStringAsFixed(2);
+                    }
+                    setState(() {
+                      _isMultiplePayers = true;
+                      _payerAmounts = Map<String, double>.from(tempPayerAmounts);
+                    });
+                    Navigator.pop(ctx);
+                    _scheduleAutoSave();
+                  },
+                  child: const Text('Done'),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_handleTabChange);
 
     _searchController.addListener(_updateSearchQuery);
     _totalAmountController.addListener(_updateSplitAmounts);
+    _descriptionController.addListener(_scheduleAutoSave);
+    _totalAmountController.addListener(_scheduleAutoSave);
 
     _loadContactsData();
 
@@ -109,6 +717,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
         'isGroup': false,
       });
     }
+
+    _checkAndLoadDraft();
   }
 
   void _handleTabChange() {
@@ -195,59 +805,133 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
       _individualPercentControllers[id]?.dispose();
       _individualAmountControllers.remove(id);
       _individualPercentControllers.remove(id);
+      _payerAmounts.remove(id);
+      if (_payerId == id) {
+        _payerId = 'you';
+        _payerName = 'You';
+      }
 
       // Recalculate splits
       _updateSplitAmounts();
     });
   }
 
+  void _populateContactsFromProviders(
+      FriendProvider friendProvider, GroupProvider groupProvider) {
+    final Map<String, Map<String, dynamic>> contactMap = {};
+
+    for (final f in friendProvider.friends) {
+      final id = f['id'].toString();
+      final isCustom = f['is_custom'] == true;
+      contactMap[id] = {
+        'id': id,
+        'name': f['full_name'] ?? f['username'] ?? 'Friend',
+        'username': f['username'],
+        'avatar_url': f['avatar_url'],
+        'is_custom': isCustom,
+        'linked_user_id': f['linked_user_id']?.toString(),
+        'isGroup': false,
+      };
+    }
+
+    final List<Map<String, dynamic>> groups = groupProvider.groups.map((g) {
+      return {
+        'id': g['id'],
+        'name': g['name'],
+        'isGroup': true,
+      };
+    }).toList();
+
+    final allFriends = contactMap.values.toList();
+    _availableContacts = [...allFriends, ...groups];
+  }
+
   Future<void> _loadContactsData() async {
     try {
-      setState(() => _isLoading = true);
+      final friendProvider =
+          Provider.of<FriendProvider>(context, listen: false);
+      final groupProvider =
+          Provider.of<GroupProvider>(context, listen: false);
 
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return;
+      // If providers already have cached contacts, populate immediately with no spinner!
+      final bool hasCached = friendProvider.friends.isNotEmpty || groupProvider.groups.isNotEmpty;
+      if (hasCached) {
+        setState(() {
+          _populateContactsFromProviders(friendProvider, groupProvider);
+        });
+      } else {
+        setState(() {
+          _isLoading = true;
+          _loadingMessage = 'Loading friends and groups...';
+        });
+      }
 
-      // Load friends
-      final friendsData = await _supabase
-          .rpc('get_user_friends', params: {'p_user_id': userId});
+      await Future.wait([
+        friendProvider.fetchFriendsAndRequests(),
+        groupProvider.fetchGroups(),
+      ]);
 
-      // Load groups
-      final groupsData = await _supabase
-          .from('group_members')
-          .select('group_id, groups:group_id(id, name)')
-          .eq('user_id', userId);
+      final Map<String, Map<String, dynamic>> contactMap = {};
 
-      // Format the data
-      List<Map<String, dynamic>> friends = [];
-      for (final f in friendsData) {
-        friends.add({
-          'id': f['user_id'],
-          'name': f['full_name'] ?? f['username'] ?? 'Unknown',
+      // 1. Add all friends from friendProvider
+      for (final f in friendProvider.friends) {
+        final id = f['id'].toString();
+        final isCustom = f['is_custom'] == true;
+        contactMap[id] = {
+          'id': id,
+          'name': f['full_name'] ?? f['username'] ?? 'Friend',
           'username': f['username'],
           'avatar_url': f['avatar_url'],
+          'is_custom': isCustom,
+          'linked_user_id': f['linked_user_id']?.toString(),
           'isGroup': false,
-        });
+        };
       }
 
-      List<Map<String, dynamic>> groups = [];
-      for (final g in groupsData) {
-        final group = g['groups'] as Map<String, dynamic>;
-        groups.add({
-          'id': group['id'],
-          'name': group['name'],
+      // 2. Also query custom_friends directly as a guaranteed fallback
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId != null) {
+        try {
+          final customRes = await _supabase
+              .from('custom_friends')
+              .select('id, name, linked_user_id')
+              .eq('user_id', userId);
+          for (final c in customRes) {
+            final id = c['id'].toString();
+            contactMap.putIfAbsent(id, () => {
+              'id': id,
+              'name': c['name'] ?? 'Friend',
+              'username': null,
+              'avatar_url': null,
+              'is_custom': true,
+              'linked_user_id': c['linked_user_id']?.toString(),
+              'isGroup': false,
+            });
+          }
+        } catch (err) {
+          LoggerService.warning('Direct custom_friends query fallback: $err');
+        }
+      }
+
+      // 3. Add groups from groupProvider
+      final List<Map<String, dynamic>> groups = groupProvider.groups.map((g) {
+        return {
+          'id': g['id'],
+          'name': g['name'],
           'isGroup': true,
-        });
-      }
+        };
+      }).toList();
 
-      // Combine friends and groups
+      final allFriends = contactMap.values.toList();
+
+      if (!mounted) return;
       setState(() {
-        _availableContacts = [...friends, ...groups];
+        _availableContacts = [...allFriends, ...groups];
         _isLoading = false;
       });
 
       LoggerService.debug(
-          'Loaded ${_availableContacts.length} contacts (${friends.length} friends, ${groups.length} groups)');
+          'Loaded ${_availableContacts.length} contacts (${allFriends.length} friends, ${groups.length} groups)');
     } catch (e) {
       LoggerService.error('Error loading contacts', e);
 
@@ -262,6 +946,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _debounceTimer?.cancel();
+
+    _searchController.removeListener(_updateSearchQuery);
+    _totalAmountController.removeListener(_updateSplitAmounts);
+    _descriptionController.removeListener(_scheduleAutoSave);
+    _totalAmountController.removeListener(_scheduleAutoSave);
+    _tabController.removeListener(_handleTabChange);
+
     _searchController.dispose();
     _descriptionController.dispose();
     _totalAmountController.dispose();
@@ -280,165 +973,121 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Add Expense',
-            style: Theme.of(context).textTheme.headlineMedium),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.document_scanner_outlined),
-            tooltip: 'Scan receipt',
-            onPressed: _scanReceipt,
-          ),
-        ],
+    return PopScope(
+      canPop: !_hasMeaningfulContent,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldDiscard = await _showDiscardDialog();
+        if (shouldDiscard == true) {
+          _isDiscardedOrSaved = true;
+          _debounceTimer?.cancel();
+          await ExpenseDraftService.clearDraft();
+          if (!context.mounted) return;
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('Add Expense',
+              style: Theme.of(context).textTheme.headlineMedium),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              tooltip: 'Download Split PDF',
+              onPressed: _downloadSplitPdf,
+            ),
+            IconButton(
+              icon: const Icon(Icons.document_scanner_outlined),
+              tooltip: 'Scan receipt',
+              onPressed: _scanReceipt,
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? LoadingSpinner(
+                initialMessage: _loadingMessage,
+                wakeUpMessage: 'Please wait as the backend wakes up...',
+              )
+            : _buildMainContent(),
+        bottomNavigationBar: _buildBottomButton(),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildMainContent(),
-      bottomNavigationBar: _buildBottomButton(),
     );
   }
 
   Widget _buildMainContent() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
+    return GestureDetector(
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      behavior: HitTestBehavior.translucent,
+      child: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildContactsSection(),
+                  ContactSelectorSection(
+                    searchController: _searchController,
+                    searchQuery: _searchQuery,
+                    availableContacts: _availableContacts,
+                    selectedContacts: _selectedContactsData,
+                    onContactSelected: (contact) {
+                      _addSelectedContact(contact);
+                      _scheduleAutoSave();
+                    },
+                    onContactRemoved: (contact) {
+                      _removeSelectedContact(contact);
+                      _scheduleAutoSave();
+                    },
+                    onFriendAdded: (newFriend) {
+                      setState(() {
+                        _availableContacts.add(newFriend);
+                        _addSelectedContact(newFriend);
+                      });
+                      _scheduleAutoSave();
+                    },
+                  ),
                   _buildBasicExpenseDetails(),
-                  _buildSplitSection(),
-                  if (_billEntries.isNotEmpty) _buildBillItems(),
+                  SplitOptionsWidget(
+                    tabController: _tabController,
+                    splitType: _splitType,
+                    selectedContacts: _selectedContactsData,
+                    totalAmountController: _totalAmountController,
+                    individualAmountControllers: _individualAmountControllers,
+                    individualPercentControllers: _individualPercentControllers,
+                    payerId: _payerId,
+                    isMultiplePayers: _isMultiplePayers,
+                    payerAmounts: _payerAmounts,
+                    onSplitTypeChanged: (type) {
+                      setState(() {
+                        _splitType = type;
+                        _updateSplitAmounts();
+                      });
+                    },
+                    onAmountsChanged: () {
+                      _updateSplitAmounts();
+                    },
+                  ),
+                  ReceiptScannerSection(
+                    billEntries: _billEntries,
+                    onBatchAssign: _billEntries.isNotEmpty
+                        ? _showBatchAssignmentOptions
+                        : null,
+                    onEditItem: _assignItemToContacts,
+                    onAddCharge: _showAddCustomChargeDialog,
+                    onDeleteItem: _deleteBillEntry,
+                  ),
                   const SizedBox(height: 80), // Space for button
                 ],
               ),
             ),
           ),
         ],
+        ),
       ),
-    );
-  }
-
-  Widget _buildContactsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Select People or Groups',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-
-        // Search bar
-        TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search friends or groups',
-            prefixIcon: const Icon(Icons.search),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            filled: true,
-            fillColor: Theme.of(context).brightness == Brightness.dark
-                ? Theme.of(context).cardColor.withOpacity(0.5)
-                : Colors.grey.shade200,
-          ),
-        ),
-
-        // Search results (only show when searching)
-        if (_searchQuery.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            constraints: const BoxConstraints(maxHeight: 200),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: _availableContacts
-                  .where((contact) => contact['name']
-                      .toString()
-                      .toLowerCase()
-                      .contains(_searchQuery.toLowerCase()))
-                  .length,
-              itemBuilder: (context, index) {
-                final filteredContacts = _availableContacts
-                    .where((contact) => contact['name']
-                        .toString()
-                        .toLowerCase()
-                        .contains(_searchQuery.toLowerCase()))
-                    .toList();
-
-                if (index >= filteredContacts.length) return const SizedBox();
-
-                final contact = filteredContacts[index];
-                final isSelected = _selectedContactsData.any((c) =>
-                    c['id'] == contact['id'] &&
-                    c['isGroup'] == contact['isGroup']);
-
-                return ListTile(
-                  leading: CircleAvatar(
-                    child: Icon(contact['isGroup'] == true
-                        ? Icons.group
-                        : Icons.person),
-                  ),
-                  title: Text(contact['name']),
-                  subtitle:
-                      Text(contact['isGroup'] == true ? 'Group' : 'Friend'),
-                  trailing: isSelected
-                      ? const Icon(Icons.check_circle, color: Colors.green)
-                      : const Icon(Icons.add_circle_outline),
-                  onTap: () {
-                    if (isSelected) {
-                      _removeSelectedContact(contact);
-                    } else {
-                      _addSelectedContact(contact);
-                      // Clear search after selection
-                      _searchController.clear();
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-
-        // Selected contacts chips
-        if (_selectedContactsData.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(
-            'Selected:',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _selectedContactsData.map((contact) {
-              return Chip(
-                avatar: CircleAvatar(
-                  child: Icon(
-                    contact['isGroup'] == true ? Icons.group : Icons.person,
-                    size: 16,
-                  ),
-                ),
-                label: Text(contact['name']),
-                deleteIcon: const Icon(Icons.close, size: 16),
-                onDeleted: () => _removeSelectedContact(contact),
-              );
-            }).toList(),
-          ),
-        ],
-
-        Divider(height: 32, color: Colors.grey.shade300),
-      ],
     );
   }
 
@@ -457,7 +1106,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           controller: _descriptionController,
           decoration: const InputDecoration(
             labelText: 'Description',
-            border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.description),
           ),
           validator: (value) {
@@ -475,7 +1123,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           child: InputDecorator(
             decoration: const InputDecoration(
               labelText: 'Date',
-              border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.calendar_today),
             ),
             child: Text(
@@ -487,10 +1134,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
         // Category
         DropdownButtonFormField<String>(
-          value: _selectedCategory,
+          initialValue: _selectedCategory,
           decoration: const InputDecoration(
             labelText: 'Category',
-            border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.category),
           ),
           items: _categories.map((String category) {
@@ -518,7 +1164,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           controller: _totalAmountController,
           decoration: InputDecoration(
             labelText: 'Total Amount',
-            border: const OutlineInputBorder(),
             //prefixIcon: const Icon(Icons.attach_money),
             prefixText: Provider.of<CurrencyProvider>(context, listen: false)
                 .currencySymbol,
@@ -538,380 +1183,37 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           },
           onChanged: (_) => _updateSplitAmounts(),
         ),
-
-        Divider(height: 32, color: Colors.grey.shade300),
-      ],
-    );
-  }
-
-  Widget _buildSplitSection() {
-    if (_selectedContactsData.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Center(
-          child: Text('Add friends or groups to split the expense'),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Split Details',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
         const SizedBox(height: 16),
 
-        // Split type tabs
-        TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Equal'),
-            Tab(text: 'Manual'),
-            Tab(text: 'Percentage'),
-          ],
-          dividerColor: Colors.grey.shade300,
-          onTap: (index) {
-            setState(() {
-              _splitType = SplitType.values[index];
-              _updateSplitAmounts();
-            });
-          },
-        ),
-
-        const SizedBox(height: 16),
-
-        // Tab content
-        SizedBox(
-          height: (_selectedContactsData.length + 1) *
-              60.0, // Height based on number of participants
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _buildEqualSplitTab(),
-              _buildManualSplitTab(),
-              _buildPercentageSplitTab(),
-            ],
-          ),
-        ),
-
-        Divider(height: 32, color: Colors.grey.shade300),
-      ],
-    );
-  }
-
-  Widget _buildEqualSplitTab() {
-    final totalAmount = double.tryParse(_totalAmountController.text) ?? 0;
-    final totalParticipants =
-        _selectedContactsData.length + 1; // +1 for current user
-    final perPersonAmount =
-        totalParticipants > 0 ? totalAmount / totalParticipants : 0;
-    final currencyProvider =
-        Provider.of<CurrencyProvider>(context, listen: false);
-
-    return ListView(
-      children: [
-        // Current user (you)
-        ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.person)),
-          title: const Text('You (paid)'),
-          trailing: Text(
-            currencyProvider.format(perPersonAmount.toDouble()),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-
-        // Selected contacts
-        ..._selectedContactsData.map((contact) => ListTile(
-              leading: CircleAvatar(
-                child: Icon(
-                    contact['isGroup'] == true ? Icons.group : Icons.person),
-              ),
-              title: Text(contact['name']),
-              trailing: Text(
-                currencyProvider.format(perPersonAmount.toDouble()),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            )),
-      ],
-    );
-  }
-
-  Widget _buildManualSplitTab() {
-    final currencyProvider =
-        Provider.of<CurrencyProvider>(context, listen: false);
-    final totalAmount = double.tryParse(_totalAmountController.text) ?? 0;
-
-    // Ensure controller for "You" exists
-    _individualAmountControllers['you'] ??=
-        TextEditingController(text: (totalAmount / (_selectedContactsData.length + 1)).toStringAsFixed(2));
-
-    return ListView(
-      children: [
-        // Current user (you)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            children: [
-              const CircleAvatar(child: Icon(Icons.person)),
-              const SizedBox(width: 16),
-              const Expanded(child: Text('You (paid)')),
-              SizedBox(
-                width: 120,
-                child: TextField(
-                  controller: _individualAmountControllers['you'],
-                  decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
-                    prefixText: currencyProvider.currencySymbol,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  ),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Selected contacts
-        ..._selectedContactsData.map((contact) {
-          final id = contact['id'].toString();
-
-          // Ensure controller exists for each contact
-          _individualAmountControllers[id] ??= TextEditingController(
-              text: (totalAmount / (_selectedContactsData.length + 1)).toStringAsFixed(2));
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  child: Icon(
-                      contact['isGroup'] == true ? Icons.group : Icons.person),
-                ),
-                const SizedBox(width: 16),
-                Expanded(child: Text(contact['name'])),
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _individualAmountControllers[id],
-                    decoration: InputDecoration(
-                      border: const OutlineInputBorder(),
-                      prefixText: currencyProvider.currencySymbol,
-                      contentPadding: const EdgeInsets.symmetric(
-                          vertical: 8, horizontal: 12),
-                    ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d+\.?\d{0,2}')),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildPercentageSplitTab() {
-    final currencyProvider =
-        Provider.of<CurrencyProvider>(context, listen: false);
-    final totalAmount = double.tryParse(_totalAmountController.text) ?? 0;
-    final defaultPercentage = 100 / (_selectedContactsData.length + 1);
-
-    return ListView(
-      children: [
-        // Current user (you)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            children: [
-              const CircleAvatar(child: Icon(Icons.person)),
-              const SizedBox(width: 16),
-              const Expanded(child: Text('You (paid)')),
-              Row(
-                children: [
-                  SizedBox(
-                    width: 80,
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        suffixText: '%',
-                        contentPadding:
-                            EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                      ),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d+\.?\d{0,2}')),
-                      ],
-                      controller: TextEditingController(
-                          text: defaultPercentage.toStringAsFixed(0)),
-                      onChanged: (_) => _updateSplitAmounts(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(currencyProvider
-                      .format((defaultPercentage / 100) * totalAmount)),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        // Selected contacts
-        ..._selectedContactsData.map((contact) {
-          final id = contact['id'].toString();
-
-          // Create controllers if they don't exist
-          _individualPercentControllers[id] ??=
-              TextEditingController(text: defaultPercentage.toStringAsFixed(0));
-
-          _individualAmountControllers[id] ??= TextEditingController(
-              text:
-                  ((defaultPercentage / 100) * totalAmount).toStringAsFixed(2));
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  child: Icon(
-                      contact['isGroup'] == true ? Icons.group : Icons.person),
-                ),
-                const SizedBox(width: 16),
-                Expanded(child: Text(contact['name'])),
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 80,
-                      child: TextField(
-                        controller: _individualPercentControllers[id],
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          suffixText: '%',
-                          contentPadding:
-                              EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                              RegExp(r'^\d+\.?\d{0,2}')),
-                        ],
-                        onChanged: (_) => _updateSplitAmounts(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(currencyProvider.format(double.parse(
-                        _individualAmountControllers[id]?.text ?? '0'))),
-                  ],
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildBillItems() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+        // Paid by selector
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            const Icon(Icons.account_balance_wallet_outlined, size: 20),
+            const SizedBox(width: 8),
             Text(
-              'Receipt Items',
-              style: Theme.of(context).textTheme.titleLarge,
+              'Paid by:',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
-            TextButton.icon(
-              icon: const Icon(Icons.people),
-              label: const Text('Batch Assign'),
-              onPressed:
-                  _billEntries.isNotEmpty ? _showBatchAssignmentOptions : null,
+            const SizedBox(width: 8),
+            ActionChip(
+              avatar: Icon(
+                _isMultiplePayers
+                    ? Icons.group
+                    : (_payerId == 'you' ? Icons.person : Icons.face),
+                size: 16,
+              ),
+              label: Text(_payerSummaryText),
+              onPressed: _showPayerSelectionDialog,
             ),
           ],
         ),
-        const SizedBox(height: 16),
 
-        // Bill items list
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _billEntries.length,
-          itemBuilder: (context, index) {
-            final item = _billEntries[index];
-
-            return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.description,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ),
-                        Text(
-                          Provider.of<CurrencyProvider>(context)
-                              .format(item.amount),
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Text('Assigned to: '),
-                        Expanded(
-                          child: Wrap(
-                            spacing: 4,
-                            children: [
-                              if (item.assignedTo.isEmpty)
-                                const Chip(label: Text('No one')),
-                              ...item.assignedTo.map((name) => Chip(
-                                    label: Text(name),
-                                    visualDensity: VisualDensity.compact,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _assignItemToContacts(item, index),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-
-        const Divider(height: 32),
+        Divider(height: 32, color: Theme.of(context).dividerColor),
       ],
     );
   }
-
   Widget _buildBottomButton() {
     return SafeArea(
       child: Padding(
@@ -982,12 +1284,45 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
     }
   }
 
-Future<File> _compressImage(File file) async {
-  final image = img.decodeImage(await file.readAsBytes());
-  final resized = img.copyResize(image!, width: 1024);
-  return File(file.path)
-    ..writeAsBytesSync(img.encodeJpg(resized, quality: 85));
-}
+  Future<File> _compressImage(File file) async {
+    // 1. Try native platform compression first (5-10x faster, background thread)
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final targetPath =
+          '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final result = await FlutterImageCompress.compressAndGetFile(
+        file.absolute.path,
+        targetPath,
+        minWidth: 1024,
+        minHeight: 1024,
+        quality: 80,
+      );
+      if (result != null) {
+        return File(result.path);
+      }
+    } catch (e) {
+      LoggerService.warning('Native image compression unavailable, falling back: $e');
+    }
+
+    // 2. Pure Dart fallback if native compression is not supported
+    try {
+      final bytes = await file.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) {
+        LoggerService.warning('Could not decode image for compression, using original file.');
+        return file;
+      }
+      final resized = img.copyResize(image, width: 1024);
+      final compressedBytes = img.encodeJpg(resized, quality: 80);
+      final tempDir = file.parent.path;
+      final tempPath = '$tempDir/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final compressedFile = File(tempPath)..writeAsBytesSync(compressedBytes);
+      return compressedFile;
+    } catch (e) {
+      LoggerService.warning('Image compression failed, using original file: $e');
+      return file;
+    }
+  }
 
   Future<void> _getImageAndProcess(ImageSource source) async {
     try {
@@ -995,97 +1330,113 @@ Future<File> _compressImage(File file) async {
       final XFile? pickedFile = await picker.pickImage(source: source);
 
       if (pickedFile == null) return;
-      
-      setState(() => _isLoading = true);
 
-      final file = File(pickedFile.path);
-      Map<String, dynamic> billResult = {};
-      Receipt? receipt;
-
-      try {
-        // Upload receipt
-        final compressedFile = await _compressImage(file);
-
-        // Process image with OCR
-        billResult = await _billService.extractBillInfo(file);
-        LoggerService.debug('Bill OCR result: $billResult');
-
-        setState(() {
-        // Update controllers and bill entries for UI
-        if (billResult.containsKey('merchant_name')) {
-          _descriptionController.text = billResult['merchant_name'].toString();
-          _guessCategory();
-        }
-        if (billResult.containsKey('total_amount')) {
-          _totalAmountController.text = billResult['total_amount'].toString();
-        }
-        _billEntries.clear();
-        if (billResult.containsKey('items') && billResult['items'] is List) {
-          for (final item in billResult['items']) {
-            if (item is Map && item.containsKey('description') && item.containsKey('amount')) {
-              _billEntries.add(
-                BillEntry(
-                  description: item['description'].toString(),
-                  amount: double.tryParse(item['amount'].toString()) ?? 0.0,
-                  assignedTo: [],
-                  type: BillEntryType.item,
-                ),
-              );
-            }
-          }
-        }
+      setState(() {
+        _isLoading = true;
+        _loadingMessage = 'Scanning receipt & extracting items...';
       });
 
-      } catch (e) {
-        LoggerService.error('OCR processing failed', e);
-        billResult = {}; // Empty result if OCR fails
+      final file = File(pickedFile.path);
+      final fileToProcess = await _compressImage(file);
+      _receiptImageFile = fileToProcess;
+
+      LoggerService.info('Extracting bill information: ${fileToProcess.path}');
+      final billResult = await _billService.extractBillInfo(fileToProcess);
+      LoggerService.debug('Bill OCR result: $billResult');
+
+      if (billResult.containsKey('error') && billResult['error'] != null) {
+        throw Exception(billResult['error'].toString());
       }
 
-      // Process OCR results
-      if (billResult.containsKey('items') && billResult['items'] is List) {
-        final items = billResult['items'] as List;
-        _billEntries.clear();
+      final List<BillEntry> newEntries = [];
 
-        // Add items from OCR
-        for (final item in items) {
-          if (item is Map && item.containsKey('description')) {
-            final price = item['price'] ?? item['amount'];
-            if (price != null) {
-              _billEntries.add(
+      // Extract merchant name if available
+      final merchant = billResult['merchant_name'] ?? billResult['merchant'];
+      if (merchant != null && merchant.toString().trim().isNotEmpty) {
+        _descriptionController.text = merchant.toString().trim();
+        _guessCategory();
+      }
+
+      // Extract date if available
+      final dateStr = billResult['date']?.toString();
+      if (dateStr != null && dateStr.trim().isNotEmpty) {
+        final parsedDate = DateTime.tryParse(dateStr.trim());
+        if (parsedDate != null) {
+          _selectedDate = parsedDate;
+        }
+      }
+
+      // Extract total amount if available
+      final total = billResult['total_amount'] ?? billResult['total'];
+      if (total != null) {
+        _totalAmountController.text = total.toString();
+      }
+
+      // Extract line items
+      final rawItems = billResult['items'] ?? billResult['line_items'];
+      if (rawItems is List) {
+        for (final item in rawItems) {
+          if (item is Map) {
+            final desc = item['description'] ?? item['name'] ?? item['item'];
+            final rawPrice = item['amount'] ?? item['price'] ?? item['total'];
+            final price = double.tryParse(rawPrice?.toString() ?? '') ?? 0.0;
+
+            if (desc != null && desc.toString().trim().isNotEmpty) {
+              newEntries.add(
                 BillEntry(
-                  description: item['description'].toString(),
-                  amount: double.tryParse(price.toString()) ?? 0.0,
+                  description: desc.toString().trim(),
+                  amount: price,
                   assignedTo: [],
-                  type: BillEntryType.item,
+                  type: _parseBillEntryType(item['type']?.toString()),
                 ),
               );
             }
           }
         }
-
-        // Set total amount if available
-        if (billResult.containsKey('total')) {
-          _totalAmountController.text = billResult['total'].toString();
-        }
-
-        // Set description (merchant name)
-        if (billResult.containsKey('merchant')) {
-          _descriptionController.text = billResult['merchant'].toString();
-          _guessCategory(); // Guess category from description
-        }
       }
-
-      setState(() => _isLoading = false);
-    } catch (e) {
-      LoggerService.error('Error processing receipt image', e);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error processing receipt: $e')),
-        );
+        setState(() {
+          _billEntries.clear();
+          _billEntries.addAll(newEntries);
+          _isLoading = false;
+        });
+
+        if (newEntries.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No individual items could be identified from the bill.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Extracted ${newEntries.length} items from receipt!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      LoggerService.error('Error processing receipt image', e);
+      if (mounted) {
         setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error reading receipt: ${e.toString().replaceAll("Exception: ", "")}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ),
+        );
       }
     }
+  }
+
+  BillEntryType _parseBillEntryType(String? type) {
+    if (type == 'tax') return BillEntryType.tax;
+    if (type == 'discount') return BillEntryType.discount;
+    return BillEntryType.item;
   }
 
   void _guessCategory() {
@@ -1117,6 +1468,7 @@ Future<File> _compressImage(File file) async {
   }
 
   void _showBatchAssignmentOptions() {
+    FocusManager.instance.primaryFocus?.unfocus();
     showModalBottomSheet(
       context: context,
       builder: (context) => Padding(
@@ -1226,12 +1578,16 @@ Future<File> _compressImage(File file) async {
   }
 
   void _updateAmountsBasedOnItemAssignments() {
-  // Skip if no items or contacts
-  if (_billEntries.isEmpty || _selectedContactsData.isEmpty) return;
-  
-  // Switch to manual split
-  _tabController.animateTo(SplitType.manual.index);
-  _splitType = SplitType.manual;
+    // Skip if no items or contacts
+    if (_billEntries.isEmpty || _selectedContactsData.isEmpty) return;
+    
+    // Switch to manual split without triggering repeated tab animations if already manual
+    if (_splitType != SplitType.manual) {
+      _splitType = SplitType.manual;
+      if (_tabController.index != SplitType.manual.index) {
+        _tabController.index = SplitType.manual.index;
+      }
+    }
   
   // Calculate amounts per person based on item assignments
   Map<String, double> personAmounts = {};
@@ -1249,9 +1605,15 @@ Future<File> _compressImage(File file) async {
     // Split item amount equally among assignees
     final perPersonAmount = item.amount / item.assignedTo.length;
     
-    // Add to each person's total
+    // Subtract for discounts, add for taxes/items
     for (final assignee in item.assignedTo) {
-      personAmounts[assignee] = (personAmounts[assignee] ?? 0) + perPersonAmount;
+      if (item.type == BillEntryType.discount) {
+        personAmounts[assignee] =
+            (personAmounts[assignee] ?? 0) - perPersonAmount;
+      } else {
+        personAmounts[assignee] =
+            (personAmounts[assignee] ?? 0) + perPersonAmount;
+      }
     }
   }
   
@@ -1259,30 +1621,112 @@ Future<File> _compressImage(File file) async {
   for (final contact in _selectedContactsData) {
     final id = contact['id'].toString();
     final name = contact['name'] as String;
+    final amt = personAmounts[name] ?? 0;
     _individualAmountControllers[id]?.text = 
-        (personAmounts[name] ?? 0).toStringAsFixed(2);
+        (amt < 0 ? 0.0 : amt).toStringAsFixed(2);
   }
   
   // Update "You" controller
+  final yourAmt = personAmounts['You'] ?? 0;
   _individualAmountControllers['you']?.text = 
-      (personAmounts['You'] ?? 0).toStringAsFixed(2);
+      (yourAmt < 0 ? 0.0 : yourAmt).toStringAsFixed(2);
   
   setState(() {});
 }
 
+  void _recalculateTotalFromBillEntries() {
+    if (_billEntries.isEmpty) return;
+
+    double calculatedTotal = 0.0;
+    for (final entry in _billEntries) {
+      if (entry.type == BillEntryType.discount) {
+        calculatedTotal -= entry.amount;
+      } else {
+        calculatedTotal += entry.amount;
+      }
+    }
+
+    if (calculatedTotal > 0) {
+      _totalAmountController.text = calculatedTotal.toStringAsFixed(2);
+      _updateSplitAmounts();
+    }
+  }
+
+  void _showAddCustomChargeDialog() {
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final allNames =
+        _selectedContactsData.map((c) => c['name'] as String).toList();
+    allNames.add('You');
+
+    showDialog(
+      context: context,
+      builder: (context) => AddCustomChargeDialog(
+        allNames: allNames,
+        onAdd: ({
+          required String description,
+          required double amount,
+          required BillEntryType type,
+          required List<String> assignedTo,
+        }) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          setState(() {
+            _billEntries.add(
+              BillEntry(
+                description: description,
+                amount: amount,
+                assignedTo: assignedTo,
+                type: type,
+              ),
+            );
+
+            _recalculateTotalFromBillEntries();
+            _updateAmountsBasedOnItemAssignments();
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Added "$description" successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _deleteBillEntry(int index) {
+    if (index >= 0 && index < _billEntries.length) {
+      final removed = _billEntries[index];
+      setState(() {
+        _billEntries.removeAt(index);
+        _recalculateTotalFromBillEntries();
+        _updateAmountsBasedOnItemAssignments();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed "${removed.description}"'),
+        ),
+      );
+    }
+  }
 
   void _assignItemToContacts(BillEntry item, int index) {
+    FocusManager.instance.primaryFocus?.unfocus();
+
     // Get all available names
     final allNames = _selectedContactsData.map((c) => c['name'] as String).toList();
     allNames.add('You'); // Add current user
 
     showDialog(
       context: context,
-      builder: (context) => _AssignItemDialog(
+      builder: (context) => AssignItemDialog(
         itemDescription: item.description,
         allNames: allNames,
         initialSelectedNames: List<String>.from(item.assignedTo),
         onSave: (selectedNames) {
+          FocusManager.instance.primaryFocus?.unfocus();
           setState(() {
             _billEntries[index] = BillEntry(
               description: item.description,
@@ -1308,6 +1752,134 @@ Future<File> _compressImage(File file) async {
     }
   }
 
+  Future<void> _downloadSplitPdf() async {
+    try {
+      final totalAmount = double.tryParse(_totalAmountController.text) ?? 0.0;
+      if (totalAmount <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter an amount before downloading the PDF')),
+        );
+        return;
+      }
+
+      final currencyProvider =
+          Provider.of<CurrencyProvider>(context, listen: false);
+      final currencySymbol = currencyProvider.currencySymbol;
+
+      final currentUserName = _getCurrentUserName();
+      final isUserPayer = _payerId == 'you';
+      String effectivePayerName;
+      if (_isMultiplePayers) {
+        final payers = <String>[];
+        if ((_payerAmounts['you'] ?? 0.0) > 0.01) {
+          payers.add(currentUserName);
+        }
+        for (final contact in _selectedContactsData) {
+          final id = contact['id'].toString();
+          if ((_payerAmounts[id] ?? 0.0) > 0.01) {
+            payers.add(contact['name'] as String);
+          }
+        }
+        if (payers.isEmpty) {
+          effectivePayerName = currentUserName;
+        } else if (payers.length == 1) {
+          effectivePayerName = payers.first;
+        } else if (payers.length == 2) {
+          effectivePayerName = '${payers[0]} & ${payers[1]}';
+        } else {
+          effectivePayerName = '${payers.length} people';
+        }
+      } else {
+        effectivePayerName = isUserPayer ? currentUserName : _payerName;
+      }
+
+      final List<Map<String, dynamic>> participantShares = [];
+
+      // Add user
+      final yourShare =
+          double.tryParse(_individualAmountControllers['you']?.text ?? '') ??
+              (_selectedContactsData.isEmpty
+                  ? totalAmount
+                  : totalAmount / (_selectedContactsData.length + 1));
+      final yourPaid = _isMultiplePayers
+          ? (_payerAmounts['you'] ?? 0.0)
+          : (isUserPayer ? totalAmount : 0.0);
+
+      participantShares.add({
+        'name': currentUserName,
+        'share': yourShare,
+        'paid': yourPaid,
+      });
+
+      // Add friends
+      for (final contact in _selectedContactsData) {
+        final id = contact['id'].toString();
+        final name = contact['name'] as String;
+        final isThisFriendPayer = _payerId == id;
+        final share =
+            double.tryParse(_individualAmountControllers[id]?.text ?? '') ??
+                (totalAmount / (_selectedContactsData.length + 1));
+        final paid = _isMultiplePayers
+            ? (_payerAmounts[id] ?? 0.0)
+            : (isThisFriendPayer ? totalAmount : 0.0);
+        participantShares.add({
+          'name': name,
+          'share': share,
+          'paid': paid,
+        });
+      }
+
+      final merchantName = _descriptionController.text.trim().isNotEmpty
+          ? _descriptionController.text.trim()
+          : 'Expense';
+
+      Uint8List? receiptImageBytes;
+      if (_receiptImageFile != null && await _receiptImageFile!.exists()) {
+        try {
+          receiptImageBytes = await _receiptImageFile!.readAsBytes();
+        } catch (_) {}
+      }
+
+      final effectiveBillEntries = _billEntries.map((entry) {
+        final updatedAssigned = entry.assignedTo.map((n) {
+          if (n.toLowerCase() == 'you') return currentUserName;
+          return n;
+        }).toList();
+        return BillEntry(
+          description: entry.description,
+          amount: entry.amount,
+          type: entry.type,
+          assignedTo: updatedAssigned,
+        );
+      }).toList();
+
+      await PdfService.downloadOrPrintPdf(
+        title: _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
+            : 'Expense Split',
+        merchantName: merchantName,
+        date: _selectedDate,
+        totalAmount: totalAmount,
+        currencySymbol: currencySymbol,
+        splitType: _getSplitTypeString(_splitType),
+        billEntries: effectiveBillEntries,
+        participantShares: participantShares,
+        receiptImageBytes: receiptImageBytes,
+        payerName: effectivePayerName,
+      );
+    } catch (e) {
+      LoggerService.error('Error generating split PDF', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error generating PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _saveExpense() async {
     if (_selectedContactsData.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1315,9 +1887,36 @@ Future<File> _compressImage(File file) async {
       return;
     }
 
+    if (_isMultiplePayers) {
+      final totalAmount = double.tryParse(_totalAmountController.text) ?? 0.0;
+      final sumPaid = _payerAmounts.values.fold(0.0, (sum, val) => sum + val);
+      if (totalAmount > 0 && (sumPaid - totalAmount).abs() > 0.05) {
+        final currencySymbol =
+            Provider.of<CurrencyProvider>(context, listen: false).currencySymbol;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Total paid ($currencySymbol${sumPaid.toStringAsFixed(2)}) does not match expense amount ($currencySymbol${totalAmount.toStringAsFixed(2)}). Please adjust payer amounts.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     if (_formKey.currentState!.validate()) {
       try {
-        setState(() => _isLoading = true);
+        final currencyProvider =
+            Provider.of<CurrencyProvider>(context, listen: false);
+        final expenseProvider =
+            Provider.of<ExpenseProvider>(context, listen: false);
+        final currencyCode = currencyProvider.currencyCode;
+
+        setState(() {
+          _isLoading = true;
+          _loadingMessage = 'Saving expense & updating balances...';
+        });
 
         // Get the current user ID
         final user = Supabase.instance.client.auth.currentUser;
@@ -1329,13 +1928,17 @@ Future<File> _compressImage(File file) async {
           throw Exception('Profile creation failed: $e');
         }
 
-        final currencyProvider =
-            Provider.of<CurrencyProvider>(context, listen: false);
-        final expenseProvider =
-            Provider.of<ExpenseProvider>(context, listen: false);
-
         // Convert the string category to an integer ID
         int? categoryId = _getCategoryId(_selectedCategory);
+
+        // Determine effective group ID if a group contact or widget.groupId is present
+        int? effectiveGroupId = widget.groupId;
+        if (effectiveGroupId == null) {
+          final groupContact = _selectedContactsData.where((c) => c['isGroup'] == true).firstOrNull;
+          if (groupContact != null) {
+            effectiveGroupId = groupContact['id'] as int?;
+          }
+        }
 
         // Create the expense
         final now = DateTime.now();
@@ -1343,11 +1946,10 @@ Future<File> _compressImage(File file) async {
           id: 0,
           description: _descriptionController.text,
           totalAmount: double.parse(_totalAmountController.text),
-          currency: Provider.of<CurrencyProvider>(context, listen: false)
-              .currencyCode,
+          currency: currencyCode,
           date: _selectedDate,
           createdBy: user.id,
-          groupId: widget.groupId,
+          groupId: effectiveGroupId,
           categoryId: categoryId,
           receiptImageUrl: null,
           splitType: _getSplitTypeString(_splitType),
@@ -1361,35 +1963,32 @@ Future<File> _compressImage(File file) async {
 
         if (success) {
           final expenseId = expenseProvider.lastInsertedId;
-          final splitType = _splitType; // Capture current value
-          final selectedContacts = List<Map<String, dynamic>>.from(
-              _selectedContactsData); // Create a copy
+          final splitType = _splitType;
+          final selectedContacts = List<Map<String, dynamic>>.from(_selectedContactsData);
           final Map<String, String> manualAmounts = {};
           final Map<String, String> percentageAmounts = {};
 
-          // Extract controller values safely
           for (final contact in selectedContacts) {
             final id = contact['id'].toString();
             manualAmounts[id] = _individualAmountControllers[id]?.text ?? '0';
-            percentageAmounts[id] =
-                _individualPercentControllers[id]?.text ?? '0';
+            percentageAmounts[id] = _individualPercentControllers[id]?.text ?? '0';
           }
-          // Capture 'you' controllers if they exist (adjust keys if needed)
-          manualAmounts['you'] =
-              _individualAmountControllers['you']?.text ?? '';
-          percentageAmounts['you'] =
-              _individualPercentControllers['you']?.text ?? '';
+          manualAmounts['you'] = _individualAmountControllers['you']?.text ?? '';
+          percentageAmounts['you'] = _individualPercentControllers['you']?.text ?? '';
 
           // Save participants
           try {
-            await _saveExpenseParticipantsWithoutContext(
-                expenseId,
-                user.id,
-                double.parse(_totalAmountController.text),
-                splitType,
-                selectedContacts,
-                manualAmounts,
-                percentageAmounts);
+            await _saveExpenseParticipants(
+              expenseId: expenseId,
+              currentUserId: user.id,
+              totalAmount: double.parse(_totalAmountController.text),
+              splitType: splitType,
+              selectedContacts: selectedContacts,
+              manualAmounts: manualAmounts,
+              percentageAmounts: percentageAmounts,
+              currencyCode: currencyCode,
+              groupId: effectiveGroupId,
+            );
             if (!mounted) return;
           } catch (e) {
             LoggerService.error('Error saving participants', e);
@@ -1403,11 +2002,16 @@ Future<File> _compressImage(File file) async {
 
           // Link receipt if available
           if (_currentReceiptId != null) {
-            await _receiptService.linkReceiptToExpense(
-                _currentReceiptId!, expenseId);
+            await _receiptService.linkReceiptToExpense(_currentReceiptId!, expenseId);
           }
           if (!mounted) return;
 
+          // Clear draft on successful save
+          _isDiscardedOrSaved = true;
+          _debounceTimer?.cancel();
+          await ExpenseDraftService.clearDraft();
+
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Expense saved successfully')),
           );
@@ -1428,248 +2032,304 @@ Future<File> _compressImage(File file) async {
     }
   }
 
-  Future<void> _saveExpenseParticipantsWithoutContext(
-      int expenseId,
-      String currentUserId,
-      double totalAmount,
-      SplitType splitType, // Receive as parameter
-      List<Map<String, dynamic>> selectedContactsData, // Receive as parameter
-      Map<String, String> individualAmountTexts, // Receive as parameter
-      Map<String, String> individualPercentTexts // Receive as parameter
-      ) async {
-    List<Map<String, dynamic>> participants = [];
-    double yourAmount = 0;
+  Future<bool> _ensureCustomFriendProfileExists(
+      String customFriendId, String name) async {
+    try {
+      final existing = await _supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', customFriendId)
+          .maybeSingle();
+      if (existing != null) return true;
 
-    // Use the passed parameters instead of state variables
+      final safeName = name.replaceAll(' ', '').toLowerCase();
+      final profileData = {
+        'id': customFriendId,
+        'username': 'custom_${safeName}_${customFriendId.replaceAll('-', '').substring(0, 4)}',
+        'full_name': name,
+        'updated_at': DateTime.now().toIso8601String(),
+        'currency': 'INR',
+        'avatar_url': null,
+        'website': null,
+      };
+      await _supabase.from('profiles').insert(profileData);
+      return true;
+    } catch (e) {
+      LoggerService.warning('Cannot create shadow profile for custom friend: $e');
+      return false;
+    }
+  }
+
+  Future<void> _saveExpenseParticipants({
+    required int expenseId,
+    required String currentUserId,
+    required double totalAmount,
+    required SplitType splitType,
+    required List<Map<String, dynamic>> selectedContacts,
+    required Map<String, String> manualAmounts,
+    required Map<String, String> percentageAmounts,
+    required String currencyCode,
+    int? groupId,
+  }) async {
+    final String effectivePayerId =
+        _payerId == 'you' ? currentUserId : _payerId;
+
+    // 1. Gather all participant IDs, separating registered users from unlinked custom friends
+    final Set<String> registeredParticipantIds = {currentUserId};
+    final List<Map<String, dynamic>> unlinkedCustomFriends = [];
+
+    for (final contact in selectedContacts) {
+      if (contact['isGroup'] == true) {
+        final gId = contact['id'];
+        final members = await _supabase
+            .from('group_members')
+            .select('user_id')
+            .eq('group_id', gId);
+        for (final m in members) {
+          final uid = m['user_id'] as String?;
+          if (uid != null && uid.isNotEmpty) {
+            registeredParticipantIds.add(uid);
+          }
+        }
+      } else {
+        final isCustom = contact['is_custom'] == true;
+        final linkedId = contact['linked_user_id']?.toString();
+
+        if (isCustom && (linkedId == null || linkedId.isEmpty)) {
+          final customFriendId = contact['id'].toString();
+          final hasProfile = await _ensureCustomFriendProfileExists(
+            customFriendId,
+            contact['name']?.toString() ?? 'Friend',
+          );
+          if (hasProfile) {
+            registeredParticipantIds.add(customFriendId);
+          } else {
+            unlinkedCustomFriends.add(contact);
+          }
+        } else {
+          final uid = (isCustom && linkedId != null)
+              ? linkedId
+              : contact['id'].toString();
+          registeredParticipantIds.add(uid);
+        }
+      }
+    }
+
+    if (groupId != null) {
+      final members = await _supabase
+          .from('group_members')
+          .select('user_id')
+          .eq('group_id', groupId);
+      for (final m in members) {
+        final uid = m['user_id'] as String?;
+        if (uid != null && uid.isNotEmpty) {
+          registeredParticipantIds.add(uid);
+        }
+      }
+    }
+
+    // All distinct participants list (registered + unlinked custom)
+    final allParticipantsList = [
+      ...registeredParticipantIds.map((id) => {'id': id, 'is_custom_unlinked': false}),
+      ...unlinkedCustomFriends.map((c) => {
+            'id': c['id'].toString(),
+            'is_custom_unlinked': true,
+            'name': c['name'] ?? 'Friend',
+          }),
+    ];
+
+    final int count = allParticipantsList.length;
+    final Map<String, double> userShares = {};
+
     switch (splitType) {
       case SplitType.equal:
-        final perPersonAmount = totalAmount / (selectedContactsData.length + 1);
-        yourAmount = perPersonAmount;
-
-        participants.add({
-          'expense_id': expenseId,
-          'user_id': currentUserId,
-          'share_amount': perPersonAmount,
-          'paid_amount': totalAmount,
-          'settled': false,
-        });
-
-        for (final contact in selectedContactsData) {
-          // Use parameter
-          if (contact['isGroup'] == true) continue;
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': contact['id'],
-            'share_amount': perPersonAmount,
-            'paid_amount': 0,
-            'settled': false,
-          });
+        final perPerson = count > 0 ? totalAmount / count : 0.0;
+        for (final p in allParticipantsList) {
+          userShares[p['id'] as String] = perPerson;
         }
         break;
 
       case SplitType.manual:
-        for (final contact in selectedContactsData) {
-          // Use parameter
-          if (contact['isGroup'] == true) continue;
-          final id = contact['id'].toString();
-          final amount = double.tryParse(individualAmountTexts[id] ?? '0') ??
-              0; // Use parameter
-
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': contact['id'],
-            'share_amount': amount,
-            'paid_amount': 0,
-            'settled': false,
-          });
+        double totalAssigned = 0.0;
+        for (final p in allParticipantsList) {
+          final id = p['id'] as String;
+          if (id == currentUserId) continue;
+          final amount = double.tryParse(manualAmounts[id] ?? '0') ?? 0.0;
+          userShares[id] = amount;
+          totalAssigned += amount;
         }
-
-        final yourAmountStr = individualAmountTexts['you']; // Use parameter
-        yourAmount = yourAmountStr != null && yourAmountStr.isNotEmpty
-            ? double.parse(yourAmountStr)
-            : totalAmount -
-                participants.fold(
-                    0.0, (sum, p) => sum + (p['share_amount'] as double));
-
-        participants.add({
-          'expense_id': expenseId,
-          'user_id': currentUserId,
-          'share_amount': yourAmount,
-          'paid_amount': totalAmount,
-          'settled': false,
-        });
+        final yourAmt = double.tryParse(manualAmounts['you'] ?? '') ??
+            (totalAmount - totalAssigned);
+        userShares[currentUserId] = yourAmt;
         break;
 
       case SplitType.percentage:
-        for (final contact in selectedContactsData) {
-          // Use parameter
-          if (contact['isGroup'] == true) continue;
-          final id = contact['id'].toString();
-          final percentageStr =
-              individualPercentTexts[id] ?? '0'; // Use parameter
-          final percentage = double.tryParse(percentageStr) ?? 0;
-          final amount = (percentage / 100) * totalAmount;
-
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': contact['id'],
-            'share_amount': amount,
-            'paid_amount': 0,
-            'settled': false,
-          });
+        for (final p in allParticipantsList) {
+          final id = p['id'] as String;
+          if (id == currentUserId) continue;
+          final pct = double.tryParse(percentageAmounts[id] ?? '0') ?? 0.0;
+          userShares[id] = (pct / 100.0) * totalAmount;
         }
-
-        final yourPercStr = individualPercentTexts['you']; // Use parameter
-        final yourPerc = double.tryParse(yourPercStr ?? '0') ?? 0;
-        yourAmount = (yourPerc / 100) * totalAmount;
-
-        participants.add({
-          'expense_id': expenseId,
-          'user_id': currentUserId,
-          'share_amount': yourAmount,
-          'paid_amount': totalAmount,
-          'settled': false,
-        });
+        final yourPct =
+            double.tryParse(percentageAmounts['you'] ?? '0') ?? 0.0;
+        userShares[currentUserId] = (yourPct / 100.0) * totalAmount;
         break;
     }
 
-    LoggerService.debug('Participants to be added: $participants');
-
-    // Insert all participants
-    await _supabase.from('expense_participants').insert(participants);
-
-    // No mounted check needed here as we don't access context/state afterwards
-    LoggerService.info(
-        'Successfully added ${participants.length} participants to expense $expenseId');
-    // IMPORTANT: Do NOT add mounted checks or UI updates here.
-  }
-
-  Future<void> _saveExpenseParticipants(int expenseId) async {
-    try {
-      final totalAmount = double.parse(_totalAmountController.text);
-      final currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId == null) return;
-
-      // Calculate participant shares based on split type
-      List<Map<String, dynamic>> participants = [];
-
-      // Add current user (who paid)
-      double yourAmount = 0;
-
-      switch (_splitType) {
-        case SplitType.equal:
-          final perPersonAmount =
-              totalAmount / (_selectedContactsData.length + 1);
-          yourAmount = perPersonAmount;
-
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': currentUserId,
-            'share_amount': perPersonAmount,
-            'paid_amount': totalAmount, // Current user paid full amount
-            'settled': false,
-          });
-
-          // Add friends/groups with their share
-          for (final contact in _selectedContactsData) {
-            if (contact['isGroup'] == true) {
-              // Skip groups for now (we'd need to handle group members separately)
-              continue;
-            }
-
-            participants.add({
-              'expense_id': expenseId,
-              'user_id': contact['id'],
-              'share_amount': perPersonAmount,
-              'paid_amount': 0, // They haven't paid
-              'settled': false,
-            });
-          }
-          break;
-
-        case SplitType.manual:
-          // Get amounts from text controllers
-          for (final contact in _selectedContactsData) {
-            final id = contact['id'].toString();
-            final amount = double.tryParse(
-                    _individualAmountControllers[id]?.text ?? '0') ??
-                0;
-
-            if (contact['isGroup'] == true) continue; // Skip groups
-
-            participants.add({
-              'expense_id': expenseId,
-              'user_id': contact['id'],
-              'share_amount': amount,
-              'paid_amount': 0,
-              'settled': false,
-            });
-          }
-
-          // Current user's share is either specified or calculated from remaining amount
-          final yourAmountStr = _individualAmountControllers['you']?.text;
-          yourAmount = yourAmountStr != null && yourAmountStr.isNotEmpty
-              ? double.parse(yourAmountStr)
-              : totalAmount -
-                  participants.fold(
-                      0.0, (sum, p) => sum + (p['share_amount'] as double));
-
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': currentUserId,
-            'share_amount': yourAmount,
-            'paid_amount': totalAmount, // Current user paid full amount
-            'settled': false,
-          });
-          break;
-
-        case SplitType.percentage:
-          // Calculate amounts from percentages
-          for (final contact in _selectedContactsData) {
-            final id = contact['id'].toString();
-            final percentageStr =
-                _individualPercentControllers[id]?.text ?? '0';
-            final percentage = double.tryParse(percentageStr) ?? 0;
-            final amount = (percentage / 100) * totalAmount;
-
-            if (contact['isGroup'] == true) continue; // Skip groups
-
-            participants.add({
-              'expense_id': expenseId,
-              'user_id': contact['id'],
-              'share_amount': amount,
-              'paid_amount': 0,
-              'settled': false,
-            });
-          }
-
-          // Current user's percentage & share
-          final yourPercStr = _individualPercentControllers['you']?.text ?? '0';
-          final yourPerc = double.tryParse(yourPercStr) ?? 0;
-          yourAmount = (yourPerc / 100) * totalAmount;
-
-          participants.add({
-            'expense_id': expenseId,
-            'user_id': currentUserId,
-            'share_amount': yourAmount,
-            'paid_amount': totalAmount, // Current user paid full amount
-            'settled': false,
-          });
-          break;
+    // Build userPaid mapping
+    final Map<String, double> userPaid = {};
+    if (_isMultiplePayers) {
+      userPaid[currentUserId] = _payerAmounts['you'] ?? 0.0;
+      for (final contact in selectedContacts) {
+        final id = contact['id'].toString();
+        final isCustom = contact['is_custom'] == true;
+        final linkedId = contact['linked_user_id']?.toString();
+        final actualId = (isCustom && linkedId != null && linkedId.isNotEmpty)
+            ? linkedId
+            : id;
+        final amt = _payerAmounts[id] ?? _payerAmounts[actualId] ?? 0.0;
+        userPaid[actualId] = amt;
       }
-
-      LoggerService.debug('Participants to be added: $participants');
-
-      if (!mounted) return;
-
-      // Insert all participants
-      await _supabase.from('expense_participants').insert(participants);
-      LoggerService.info(
-          'Successfully added ${participants.length} participants to expense $expenseId');
-    } catch (e) {
-      LoggerService.error('Error saving expense participants', e);
-      rethrow;
+    } else {
+      for (final p in allParticipantsList) {
+        final id = p['id'] as String;
+        userPaid[id] = (id == effectivePayerId) ? totalAmount : 0.0;
+      }
     }
+
+    // Build participant rows ONLY for registered profiles (prevents foreign key violation)
+    final participants = registeredParticipantIds.map((uid) {
+      return {
+        'expense_id': expenseId,
+        'user_id': uid,
+        'share_amount': userShares[uid] ?? 0.0,
+        'paid_amount': userPaid[uid] ?? 0.0,
+        'settled': false,
+      };
+    }).toList();
+
+    LoggerService.debug(
+        'Inserting ${participants.length} registered participants for expense $expenseId');
+    if (participants.isNotEmpty) {
+      await _supabase.from('expense_participants').insert(participants);
+    }
+
+    // Calculate net positions for all participants
+    // net = paid - share
+    // If net > 0: Creditor (they are owed money)
+    // If net < 0: Debtor (they owe money)
+    final Map<String, double> creditors = {};
+    final Map<String, double> debtors = {};
+
+    for (final p in allParticipantsList) {
+      final id = p['id'] as String;
+      final paid = userPaid[id] ?? 0.0;
+      final share = userShares[id] ?? 0.0;
+      final net = paid - share;
+
+      if (net > 0.005) {
+        creditors[id] = net;
+      } else if (net < -0.005) {
+        debtors[id] = -net;
+      }
+    }
+
+    final double totalCredit =
+        creditors.values.fold(0.0, (sum, val) => sum + val);
+
+    final balanceService = BalanceService();
+    final Set<String> unlinkedCustomIds =
+        unlinkedCustomFriends.map((c) => c['id'].toString()).toSet();
+
+    if (totalCredit > 0.005) {
+      for (final debtorEntry in debtors.entries) {
+        final debtorId = debtorEntry.key;
+        final debt = debtorEntry.value;
+
+        for (final creditorEntry in creditors.entries) {
+          final creditorId = creditorEntry.key;
+          final credit = creditorEntry.value;
+
+          // Proportional share of debt: amount debtor owes creditor
+          final amountOwed = (debt * credit) / totalCredit;
+          if (amountOwed <= 0.005) continue;
+
+          if (debtorId == currentUserId) {
+            // Current user owes creditor
+            if (unlinkedCustomIds.contains(creditorId)) {
+              await CustomFriendBalanceService.adjustBalance(
+                customFriendId: creditorId,
+                deltaAmount: -amountOwed,
+              );
+            } else {
+              await balanceService.adjustBalance(
+                fromUserId: currentUserId,
+                toUserId: creditorId,
+                deltaAmount: -amountOwed,
+                currency: currencyCode,
+                groupId: groupId,
+              );
+            }
+          } else if (creditorId == currentUserId) {
+            // Debtor owes current user
+            if (unlinkedCustomIds.contains(debtorId)) {
+              await CustomFriendBalanceService.adjustBalance(
+                customFriendId: debtorId,
+                deltaAmount: amountOwed,
+              );
+            } else {
+              await balanceService.adjustBalance(
+                fromUserId: currentUserId,
+                toUserId: debtorId,
+                deltaAmount: amountOwed,
+                currency: currencyCode,
+                groupId: groupId,
+              );
+            }
+          } else {
+            // Neither is current user - if both are registered users (e.g. in a group)
+            if (!unlinkedCustomIds.contains(debtorId) &&
+                !unlinkedCustomIds.contains(creditorId)) {
+              await balanceService.adjustBalance(
+                fromUserId: creditorId,
+                toUserId: debtorId,
+                deltaAmount: amountOwed,
+                currency: currencyCode,
+                groupId: groupId,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // For unlinked custom friends: record persistently in CustomFriendBalanceService
+    for (final cf in unlinkedCustomFriends) {
+      final cfId = cf['id'].toString();
+      final share = userShares[cfId] ?? 0.0;
+      final paid = userPaid[cfId] ?? 0.0;
+      final userPaidAmount = userPaid[currentUserId] ?? 0.0;
+      final paidByYou = userPaidAmount >= totalAmount - 0.01;
+
+      await CustomFriendBalanceService.recordParticipation(
+        expenseId: expenseId,
+        customFriendId: cfId,
+        description: _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
+            : 'Expense',
+        totalAmount: totalAmount,
+        friendShare: share,
+        paidByYou: paidByYou,
+        date: _selectedDate,
+        payerId: _isMultiplePayers
+            ? 'multiple'
+            : (_payerId == 'you' ? currentUserId : _payerId),
+        paidAmount: paid,
+      );
+    }
+
+    LoggerService.info(
+        'Successfully added participants and balances for expense $expenseId');
   }
 
   Future<void> _ensureUserProfileExists(String userId) async {
@@ -1723,96 +2383,5 @@ Future<File> _compressImage(File file) async {
     };
 
     return categoryMap[categoryName] ?? 7; // Default to 'Other'
-  }
-}
-
-// Support classes
-enum SplitType { equal, manual, percentage }
-
-class BillEntry {
-  final String description;
-  final double amount;
-  final List<String> assignedTo;
-  final BillEntryType type;
-
-  BillEntry({
-    required this.description,
-    required this.amount,
-    required this.assignedTo,
-    this.type = BillEntryType.item,
-  });
-}
-
-enum BillEntryType { item, tax, discount }
-
-class _AssignItemDialog extends StatefulWidget {
-  final String itemDescription;
-  final List<String> allNames;
-  final List<String> initialSelectedNames;
-  final Function(List<String>) onSave;
-
-  const _AssignItemDialog({
-    required this.itemDescription,
-    required this.allNames,
-    required this.initialSelectedNames,
-    required this.onSave,
-  });
-
-  @override
-  State<_AssignItemDialog> createState() => _AssignItemDialogState();
-}
-
-class _AssignItemDialogState extends State<_AssignItemDialog> {
-  late List<String> selectedNames;
-
-  @override
-  void initState() {
-    super.initState();
-    selectedNames = List<String>.from(widget.initialSelectedNames);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('Assign "${widget.itemDescription}"'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: widget.allNames.length,
-          itemBuilder: (context, i) {
-            final name = widget.allNames[i];
-            return CheckboxListTile(
-              title: Text(name),
-              value: selectedNames.contains(name),
-              onChanged: (bool? value) {
-                setState(() {
-                  if (value == true) {
-                    if (!selectedNames.contains(name)) {
-                      selectedNames.add(name);
-                    }
-                  } else {
-                    selectedNames.remove(name);
-                  }
-                });
-              },
-            );
-          },
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('CANCEL'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            widget.onSave(selectedNames);
-            Navigator.pop(context);
-          },
-          child: const Text('SAVE'),
-        ),
-      ],
-    );
   }
 }

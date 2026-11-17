@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../providers/currency_provider.dart';
+import '../providers/group_provider.dart';
+import '../widgets/loading_spinner.dart';
 import 'add_expense_screen.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
@@ -14,12 +17,12 @@ class GroupDetailsScreen extends StatefulWidget {
 
 class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     with SingleTickerProviderStateMixin {
-  final _supabase = Supabase.instance.client;
   bool _loading = true, _error = false;
   String? _errorMsg;
   String? _groupName, _inviteCode;
   final List<Map<String, dynamic>> _members = [];
   final List<Map<String, dynamic>> _activities = [];
+  final Map<String, Map<String, double>> _memberBalances = {};
   late TabController _tabController;
   String? _currentUserId;
   String? _createdById; // Track the creator ID to check admin permissions
@@ -29,7 +32,8 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _currentUserId = _supabase.auth.currentUser?.id;
+    final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+    _currentUserId = groupProvider.currentUserId;
     _loadAll();
 
     // Listen for tab changes to update FAB
@@ -60,61 +64,26 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
   Future<void> _loadAll() async {
     setState(() => _loading = true);
     try {
-      // 1. Fetch group info
-      final groupRes = await _supabase
-          .from('groups')
-          .select('name, invite_code, created_by')
-          .eq('id', widget.groupId)
-          .single();
+      final groupProvider =
+          Provider.of<GroupProvider>(context, listen: false);
+      final details = await groupProvider.fetchGroupDetails(widget.groupId);
 
-      _groupName = groupRes['name'] as String?;
-      _inviteCode = groupRes['invite_code'] as String?;
-      _createdById = groupRes['created_by'] as String?;
-
-      // 2. Fetch members with their profiles
-      final membersRes = await _supabase
-          .from('group_members')
-          .select(
-              'user_id, role, joined_at, profiles:user_id(username, full_name, avatar_url)')
-          .eq('group_id', widget.groupId);
-
-      _members.clear();
-      for (final m in membersRes) {
-        final profile = m['profiles'] ?? {};
-        _members.add({
-          'user_id': m['user_id'],
-          'role': m['role'],
-          'joined_at': m['joined_at'],
-          'username': profile['username'],
-          'full_name': profile['full_name'],
-          'avatar_url': profile['avatar_url'],
-        });
-      }
-
-      // 3. Fetch expenses for this group
-      final expensesRes = await _supabase
-          .from('expenses')
-          .select('''
-          id, description, total_amount, date, created_at,
-          creator:created_by(username, full_name)
-        ''')
-          .eq('group_id', widget.groupId)
-          .order('date', ascending: false)
-          .limit(20);
-
-      _activities.clear();
-      for (final e in expensesRes) {
-        final creator = e['creator'] ?? {};
-        _activities.add({
-          'id': e['id'],
-          'desc': e['description'],
-          'amount': e['total_amount'],
-          'when': e['date'] != null
-              ? DateTime.parse(e['date'])
-              : DateTime.parse(e['created_at']),
-          'actor': creator['full_name'] ?? creator['username'] ?? 'Unknown',
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _groupName = details['groupName'];
+        _inviteCode = details['inviteCode'];
+        _createdById = details['createdById'];
+        _members.clear();
+        _members.addAll(List<Map<String, dynamic>>.from(details['members']));
+        _activities.clear();
+        _activities.addAll(
+            List<Map<String, dynamic>>.from(details['activities']));
+        _memberBalances.clear();
+        _memberBalances.addAll(
+            Map<String, Map<String, double>>.from(details['memberBalances']));
+        _error = false;
+        _errorMsg = null;
+      });
     } catch (e) {
       _error = true;
       _errorMsg = e.toString();
@@ -174,16 +143,19 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
       ),
     );
 
+    if (!mounted) return;
+
     if (result == true) {
       final newName = nameController.text.trim();
 
       if (newName.isNotEmpty) {
         setState(() => _loading = true);
         try {
-          await _supabase.from('groups').update({
-            'name': newName,
-          }).eq('id', widget.groupId);
+          final groupProvider =
+              Provider.of<GroupProvider>(context, listen: false);
+          await groupProvider.updateGroupName(widget.groupId, newName);
 
+          if (!mounted) return;
           setState(() {
             _groupName = newName;
           });
@@ -192,11 +164,12 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
             const SnackBar(content: Text('Group name updated successfully')),
           );
         } catch (e) {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error updating group: $e')),
           );
         } finally {
-          setState(() => _loading = false);
+          if (mounted) setState(() => _loading = false);
         }
       }
     }
@@ -230,17 +203,23 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
       ),
     );
 
+    if (!mounted) return;
+
     if (result == true) {
       setState(() => _loading = true);
       try {
-        await _supabase.from('groups').delete().eq('id', widget.groupId);
+        final groupProvider =
+            Provider.of<GroupProvider>(context, listen: false);
+        await groupProvider.deleteGroup(widget.groupId);
 
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Group deleted')),
         );
 
         Navigator.pop(context); // Return to groups list
       } catch (e) {
+        if (!mounted) return;
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error deleting group: $e')),
@@ -258,9 +237,12 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     final onPrimaryColor = colorScheme.onPrimary;
     final textColor = theme.textTheme.bodyLarge?.color ?? Colors.black87;
 
-    if (_loading) {
+    if (_loading && _groupName == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: LoadingSpinner(
+          initialMessage: 'Loading group details...',
+          wakeUpMessage: 'Please wait as the backend wakes up...',
+        ),
       );
     }
     if (_error) {
@@ -418,15 +400,13 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                         itemBuilder: (context, i) {
                           final m = _members[i];
                           final isCurrentUser = m['user_id'] == _currentUserId;
-                          final isCreator = m['user_id'] == _createdById;
                           final isAdmin = m['role'] == 'admin';
 
-                          // Calculate balances (this would come from your actual data)
-                          // This is placeholder logic - replace with real balance calculation
-                          final double youOwe =
-                              isCurrentUser ? 0 : (i % 3 == 0 ? 12.50 : 0);
-                          final double youAreOwed =
-                              isCurrentUser ? 0 : (i % 2 == 0 ? 23.75 : 0);
+                          final memberId = m['user_id'] as String;
+                          final balances = _memberBalances[memberId] ?? {'youOwe': 0.0, 'youAreOwed': 0.0};
+                          final double youOwe = isCurrentUser ? 0.0 : (balances['youOwe'] ?? 0.0);
+                          final double youAreOwed = isCurrentUser ? 0.0 : (balances['youAreOwed'] ?? 0.0);
+                          final currencyProvider = Provider.of<CurrencyProvider>(context, listen: false);
 
                           return Card(
                             margin: const EdgeInsets.symmetric(
@@ -441,7 +421,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                                       ? NetworkImage(m['avatar_url'])
                                       : null,
                                   backgroundColor:
-                                      colorScheme.primary.withOpacity(.2),
+                                      colorScheme.primary.withValues(alpha: .2),
                                   child: m['avatar_url'] == null
                                       ? const Icon(Icons.person)
                                       : null,
@@ -519,7 +499,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                                               backgroundColor:
                                                   Colors.red.shade50,
                                               label: Text(
-                                                'You owe: ${_currencyFormatter.format(youOwe)}',
+                                                'You owe: ${currencyProvider.format(youOwe)}',
                                                 style: const TextStyle(
                                                   color: Colors.red,
                                                   fontWeight: FontWeight.w500,
@@ -527,7 +507,8 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                                                 ),
                                               ),
                                             ),
-                                          const SizedBox(width: 8),
+                                          if (youOwe > 0 && youAreOwed > 0)
+                                            const SizedBox(width: 8),
                                           if (youAreOwed > 0)
                                             Chip(
                                               materialTapTargetSize:
@@ -538,9 +519,27 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                                               backgroundColor:
                                                   Colors.green.shade50,
                                               label: Text(
-                                                'Owes you: ${_currencyFormatter.format(youAreOwed)}',
+                                                'Owes you: ${currencyProvider.format(youAreOwed)}',
                                                 style: const TextStyle(
                                                   color: Colors.green,
+                                                  fontWeight: FontWeight.w500,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          if (youOwe == 0 && youAreOwed == 0)
+                                            Chip(
+                                              materialTapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              backgroundColor:
+                                                  Colors.grey.shade100,
+                                              label: const Text(
+                                                'Settled up',
+                                                style: TextStyle(
+                                                  color: Colors.grey,
                                                   fontWeight: FontWeight.w500,
                                                   fontSize: 12,
                                                 ),
